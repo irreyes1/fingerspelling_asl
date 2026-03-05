@@ -1,4 +1,4 @@
-Fingerspelling ASL
+﻿Fingerspelling ASL
 
 Proyecto para entrenamiento de reconocimiento de fingerspelling con CTC.
 
@@ -16,7 +16,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Setup rápido (automático):
+Setup rapido (automatico):
 ```powershell
 .\setup.ps1
 ```
@@ -53,13 +53,18 @@ Con W&B:
 python -m src.train --data_dir data/asl-fingerspelling --use_wandb --wandb_project fingerspelling_asl
 ```
 
-Flags útiles:
+Flags utiles:
 - `--wandb_entity <usuario_o_team>`
 - `--wandb_run_name <nombre_run>`
 - `--wandb_mode offline`
 - `--wandb_tags tag1,tag2`
 
-## 5) Inferencia rápida de checkpoint
+## 4.1) Arquitecturas en el repo
+- `src/models/embedded_rnn.py`: baseline simple.
+- `src/models/tcn_bilstm.py`: arquitectura del run final `archcmp2_tcn_bilstm_full_20260303`.
+- `src/model_loader.py`: factory que detecta la arquitectura del checkpoint y carga el modelo correcto.
+
+## 5) Inferencia rapida de checkpoint
 ```bash
 python -m src.quick_infer --ckpt artifacts/models/<checkpoint>.pt --n 16
 ```
@@ -69,7 +74,17 @@ python -m src.quick_infer --ckpt artifacts/models/<checkpoint>.pt --n 16
 python -m src.realtime_webcam
 ```
 
-Nota: `src/realtime_webcam.py` usa `artifacts/models/hand_landmarker.task` para detección de manos.
+Nota: `src/realtime_webcam.py` usa `artifacts/models/hand_landmarker.task` para deteccion de manos.
+
+Demo con checkpoint entrenado:
+```bash
+python -m src.realtime_webcam_infer --ckpt artifacts/models/archcmp2_tcn_bilstm_full_20260303_best.pt
+```
+
+Controles demo:
+- `ESPACIO`: capturar letra puntual (modo guiado).
+- `c`: limpiar `Live letters` y `Words`.
+- `ESC`: salir.
 
 ## 7) Modelo entrenado (ejemplo)
 Checkpoint best:
@@ -85,6 +100,6 @@ gcloud compute scp --zone=us-central1-b --project=buoyant-purpose-479417-t8 `
 ```
 
 ## 8) Troubleshooting
-Guía rápida de errores frecuentes:
+Guia rapida de errores frecuentes:
 
 `docs/TROUBLESHOOTING.md`

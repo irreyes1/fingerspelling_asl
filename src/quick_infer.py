@@ -9,7 +9,7 @@ import pandas as pd
 from torch.utils.data import DataLoader
 
 from src.data.dataset import ASLRightHandDataset, collate_fn
-from src.models.embedded_rnn import EmbeddedRNN
+from src.model_loader import load_model_from_checkpoint
 
 CTC_BLANK_ID = 0
 
@@ -148,37 +148,6 @@ def build_dataset(args, char_to_idx):
 # ---------------------------------------------------------
 # Load checkpoint safely
 # ---------------------------------------------------------
-def extract_state_dict(ckpt):
-    if isinstance(ckpt, dict):
-        if "model_state_dict" in ckpt:
-            return ckpt["model_state_dict"]
-        if "state_dict" in ckpt:
-            return ckpt["state_dict"]
-    return ckpt
-
-
-def load_model(ckpt_path, device, input_dim):
-    try:
-        ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
-    except TypeError:
-        ckpt = torch.load(ckpt_path, map_location=device)
-    state_dict = extract_state_dict(ckpt)
-
-    hidden_size = state_dict["rnn.weight_ih_l0"].shape[0]
-    output_dim = state_dict["fc.weight"].shape[0]
-
-    model = EmbeddedRNN(
-        input_dim=input_dim,
-        hidden_dim=hidden_size,
-        output_dim=output_dim,
-    ).to(device)
-
-    model.load_state_dict(state_dict)
-
-    model.eval()
-    return model
-
-
 # ---------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------
@@ -237,13 +206,15 @@ def main():
 
     X = X.to(device)
 
-    input_dim = X.shape[2]
     print("Loading model...")
-    model = load_model(
-        ckpt_path=args.ckpt,
-        device=device,
-        input_dim=input_dim,
-    )
+    loaded = load_model_from_checkpoint(ckpt_path=args.ckpt, device=device)
+    model = loaded.model
+
+    if int(loaded.input_dim) != int(X.shape[2]):
+        raise ValueError(
+            f"Input dim mismatch: model expects {loaded.input_dim}, dataset has {X.shape[2]}. "
+            "Use data/preprocessing compatible with this checkpoint."
+        )
 
     print("Running inference...")
     with torch.no_grad():
