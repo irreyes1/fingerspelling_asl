@@ -14,3 +14,4 @@ mediapipe
 streamlit
 plotly
 wandb
+gcsfs

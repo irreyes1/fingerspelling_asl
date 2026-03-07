@@ -9,6 +9,8 @@ from torch.utils.data import Dataset
 import pyarrow.parquet as pq
 import pyarrow as pa
 
+from src.utils.filesystem import get_filesystem, join_path
+
 MAX_FRAMES_DEFAULT = 160
 
 _RIGHT_HAND_COLS: Optional[List[str]] = None
@@ -72,6 +74,7 @@ class ASLRightHandDataset(Dataset):
         self.df = df.reset_index(drop=True)
         self.landmarks_dir = landmarks_dir
         self.max_frames = max_frames
+        self.fs = get_filesystem(landmarks_dir)
 
     def __len__(self) -> int:
         return len(self.df)
@@ -81,8 +84,8 @@ class ASLRightHandDataset(Dataset):
         file_id = int(row["file_id"])
         sequence_id = int(row["sequence_id"])
 
-        parquet_path = os.path.join(self.landmarks_dir, f"{file_id}.parquet")
-        if not os.path.exists(parquet_path):
+        parquet_path = join_path(self.fs, self.landmarks_dir, f"{file_id}.parquet")
+        if not self.fs.exists(parquet_path):
             # If parquet missing, mark sample invalid
             return None
 

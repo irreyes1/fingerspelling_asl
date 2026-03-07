@@ -1,6 +1,8 @@
 import os
+import re
 import json
 import argparse
+from fsspec.implementations.local import LocalFileSystem 
 from datetime import datetime
 from typing import List, Tuple
 
@@ -19,6 +21,7 @@ except ImportError:
 from src.models.embedded_rnn import EmbeddedRNN
 from src.data.dataset import ASLRightHandDataset, collate_fn
 from src.utils.metrics import evaluate_metrics, ctc_greedy_decode
+from src.utils.filesystem import get_filesystem, join_path
 
 CTC_BLANK_ID = 0
 
@@ -27,8 +30,8 @@ def encode_phrase(phrase: str, letter_to_int: dict) -> list:
     return [letter_to_int[c] for c in phrase if c in letter_to_int]
 
 
-def build_ctc_vocab(vocab_json_path: str):
-    with open(vocab_json_path, "r", encoding="utf-8") as f:
+def build_ctc_vocab(vocab_json_path: str, fs=LocalFileSystem()) -> Tuple[dict, dict, int]:
+    with fs.open(vocab_json_path, "r") as f:
         base_char_to_idx = {k: int(v) for k, v in json.load(f).items()}
 
     if "<blank>" in base_char_to_idx:
@@ -56,16 +59,13 @@ def split_by_participant(df: pd.DataFrame, val_ratio: float = 0.2, seed: int = 4
     return train_df, val_df
 
 
-def existing_file_ids(landmarks_dir: str):
-    if not os.path.isdir(landmarks_dir):
+def existing_file_ids(landmarks_dir: str, fs=LocalFileSystem()):
+    if not fs.isdir(landmarks_dir):
         return set()
     out = set()
-    for fn in os.listdir(landmarks_dir):
-        if fn.endswith(".parquet"):
-            try:
-                out.add(int(os.path.splitext(fn)[0]))
-            except ValueError:
-                pass
+    filenames = [f['name'] for f in fs.listdir(landmarks_dir)]
+    matches = [re.search(r'(\d+).parquet', fn) for fn in filenames]
+    out = set(int(m.group(1)) for m in matches if m is not None)
     return out
 
 
@@ -193,17 +193,19 @@ def main():
 
     args = p.parse_args()
 
+    fs = get_filesystem(args.data_dir)
     train_csv = args.train_csv
+    
     if not os.path.isabs(train_csv):
-        train_csv = os.path.join(args.data_dir, train_csv)
-    vocab_json = os.path.join(args.data_dir, "character_to_prediction_index.json")
-    landmarks_dir = os.path.join(args.data_dir, "train_landmarks")
+        train_csv = join_path(fs, args.data_dir, train_csv)
+    vocab_json =join_path(fs,args.data_dir, "character_to_prediction_index.json")
+    landmarks_dir = join_path(fs, args.data_dir, "train_landmarks")
 
-    if not os.path.exists(train_csv):
+    if not fs.exists(train_csv):
         raise FileNotFoundError(f"Missing {train_csv}")
-    if not os.path.exists(vocab_json):
+    if not fs.exists(vocab_json):
         raise FileNotFoundError(f"Missing {vocab_json}")
-    if not os.path.isdir(landmarks_dir):
+    if not fs.isdir(landmarks_dir):
         raise FileNotFoundError(f"Missing folder {landmarks_dir}")
 
     # Device
@@ -211,7 +213,7 @@ def main():
     print(f"Device: {device}")
 
     # Load vocab mapping (char -> id) in CTC-compatible form
-    letter_to_int, int_to_letter, blank_id = build_ctc_vocab(vocab_json)
+    letter_to_int, int_to_letter, blank_id = build_ctc_vocab(vocab_json, fs)
 
     # Load train.csv
     df = pd.read_csv(train_csv)
@@ -221,7 +223,7 @@ def main():
         raise ValueError(f"train.csv is missing columns: {missing}")
 
     # Filter by parquets you actually downloaded
-    have_ids = existing_file_ids(landmarks_dir)
+    have_ids = existing_file_ids(landmarks_dir, fs)
     if not have_ids:
         raise ValueError(
             f"No parquet files found in {landmarks_dir}. "

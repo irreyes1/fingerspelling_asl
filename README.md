@@ -31,6 +31,11 @@ pip install -r requirements.txt
 ## 3) Datos (no incluidos en Git)
 Este repo no sube parquets ni checkpoints pesados.
 
+2 Opciones para cargar los datasets dependiendo del tipo de path en el parametro ``--data_dir``.
+
+### 3.1) Datos en local
+Con un ``--data_dir`` local, eg. ``data/asl-fingerspelling`` 
+
 Estructura esperada:
 ```text
 data/
@@ -41,6 +46,12 @@ data/
     train_landmarks/*.parquet
     supplemental_landmarks/*.parquet
 ```
+
+### 3.2) Datos de google cloud
+Con un ``--data_dir`` que corresponda una URL de bucket, eg. ``gs://aidl_asl_datasets/asl-fingerspelling`` 
+
+Es necesario authenticarse on el projecto en que esta el bucket antes de ejecutar el projecto
+```gcloud auth application-default login --project firststepsgc```
 
 ## 4) Entrenamiento
 Comando base:
