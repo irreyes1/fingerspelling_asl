@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any
 
 import torch
 import torch.nn as nn
@@ -14,6 +14,7 @@ class LoadedModel:
     model: nn.Module
     input_dim: int
     output_dim: int
+    config: Dict[str, Any]
 
 
 def extract_state_dict(ckpt):
@@ -83,7 +84,7 @@ def _build_tcn_birnn_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> Loa
         bidirectional=bidirectional,
     )
     model.load_state_dict(state_dict, strict=True)
-    return LoadedModel(model=model, input_dim=input_dim, output_dim=output_dim)
+    return LoadedModel(model=model, input_dim=input_dim, output_dim=output_dim, config={})
 
 
 def _build_embedded_rnn_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> LoadedModel:
@@ -98,7 +99,7 @@ def _build_embedded_rnn_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> 
         output_dim=output_dim,
     )
     model.load_state_dict(state_dict, strict=True)
-    return LoadedModel(model=model, input_dim=input_dim, output_dim=output_dim)
+    return LoadedModel(model=model, input_dim=input_dim, output_dim=output_dim, config={})
 
 
 def load_model_from_checkpoint(ckpt_path: str, device: torch.device) -> LoadedModel:
@@ -119,6 +120,13 @@ def load_model_from_checkpoint(ckpt_path: str, device: torch.device) -> LoadedMo
             + ", ".join(sample_keys)
         )
 
+    ckpt_config: Dict[str, Any] = {}
+    if isinstance(ckpt, dict):
+        raw_cfg = ckpt.get("config", {})
+        if isinstance(raw_cfg, dict):
+            ckpt_config = raw_cfg
+
+    loaded.config = ckpt_config
     loaded.model = loaded.model.to(device)
     loaded.model.eval()
     return loaded

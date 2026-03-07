@@ -108,7 +108,7 @@ def _project_root():
 # ---------------------------------------------------------
 # Build dataset like train.py
 # ---------------------------------------------------------
-def build_dataset(args, char_to_idx):
+def build_dataset(args, char_to_idx, lowercase_phrases: bool = False, letters_only: bool = False):
     root = _project_root()
     if args.csv is None:
         args.csv = os.path.join(root, "data", "asl-fingerspelling", "train.csv")
@@ -126,7 +126,15 @@ def build_dataset(args, char_to_idx):
 
     df = pd.read_csv(args.csv)
 
-    if "encoded" not in df.columns:
+    if "phrase" in df.columns:
+        if lowercase_phrases:
+            df["phrase"] = df["phrase"].astype(str).str.lower()
+        if letters_only:
+            df["phrase"] = df["phrase"].astype(str).str.replace(r"[^a-z]", "", regex=True)
+        df = df[df["phrase"].astype(str).str.len() > 0].copy()
+
+    # Re-encode from phrase when text filters are active to keep consistency with training.
+    if "encoded" not in df.columns or lowercase_phrases or letters_only:
         if "phrase" not in df.columns:
             raise ValueError("El CSV no tiene ni 'encoded' ni 'phrase'.")
         df["encoded"] = df["phrase"].apply(lambda x: encode_phrase(x, char_to_idx))
@@ -168,6 +176,18 @@ def main():
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--vocab_json", type=str, default=None,
                         help="Path to character_to_prediction_index.json")
+    parser.add_argument(
+        "--letters_only",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force letters_only filter; by default follows checkpoint config if available",
+    )
+    parser.add_argument(
+        "--lowercase_phrases",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force lowercase filter; by default follows checkpoint config if available",
+    )
 
     args = parser.parse_args()
 
@@ -181,9 +201,17 @@ def main():
     char_to_idx, idx2char, blank_id = load_vocab(args)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Loading model...")
+    loaded = load_model_from_checkpoint(ckpt_path=args.ckpt, device=device)
+    model = loaded.model
+
+    ckpt_cfg = loaded.config or {}
+    lowercase_phrases = bool(ckpt_cfg.get("lowercase_phrases", False)) if args.lowercase_phrases is None else bool(args.lowercase_phrases)
+    letters_only = bool(ckpt_cfg.get("letters_only", False)) if args.letters_only is None else bool(args.letters_only)
+    print(f"Text filters: lowercase={lowercase_phrases} letters_only={letters_only}")
 
     print("Building dataset...")
-    dataset = build_dataset(args, char_to_idx)
+    dataset = build_dataset(args, char_to_idx, lowercase_phrases=lowercase_phrases, letters_only=letters_only)
 
     loader = DataLoader(
         dataset,
@@ -205,10 +233,6 @@ def main():
     X, Y, input_lens, target_lens = batch
 
     X = X.to(device)
-
-    print("Loading model...")
-    loaded = load_model_from_checkpoint(ckpt_path=args.ckpt, device=device)
-    model = loaded.model
 
     if int(loaded.input_dim) != int(X.shape[2]):
         raise ValueError(
