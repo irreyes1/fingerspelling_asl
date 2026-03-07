@@ -104,12 +104,13 @@ def collect_gt_pred_examples(
             X, Y, input_lens, target_lens = batch
             X = X.to(device)
             outputs = model(X)  # (T, B, C)
+            model_input_lens = project_input_lengths(model, input_lens)
             batch_size = outputs.shape[1]
             y_list = Y.detach().cpu().tolist()
 
             start = 0
             for i in range(batch_size):
-                valid_t = int(input_lens[i].item())
+                valid_t = int(model_input_lens[i].item())
                 pred_text = ctc_greedy_decode(outputs[:valid_t, i, :], int_to_letter, blank_id)
                 target_len = int(target_lens[i].item())
                 tgt_ids = y_list[start:start + target_len]
@@ -199,11 +200,19 @@ def parse_kernel_list(raw: str) -> Tuple[int, ...]:
 
 
 def create_model(args, input_dim: int, output_dim: int):
+    subsampling_hidden_dim = None
+    if int(args.temporal_subsampling_hidden_dim) > 0:
+        subsampling_hidden_dim = int(args.temporal_subsampling_hidden_dim)
+
     if args.arch == "embedded_rnn":
         model = EmbeddedRNN(
             input_dim=input_dim,
             hidden_dim=args.hidden_dim,
             output_dim=output_dim,
+            enable_temporal_subsampling=args.enable_temporal_subsampling,
+            temporal_subsampling_type=args.temporal_subsampling_type,
+            temporal_subsampling_factor=args.temporal_subsampling_factor,
+            temporal_subsampling_hidden_dim=subsampling_hidden_dim,
         )
     elif args.arch == "tcn_bilstm":
         model = TCNBiRNN(
@@ -215,10 +224,20 @@ def create_model(args, input_dim: int, output_dim: int):
             rnn_type=args.rnn_type.lower(),
             output_dim=output_dim,
             bidirectional=args.bidirectional,
+            enable_temporal_subsampling=args.enable_temporal_subsampling,
+            temporal_subsampling_type=args.temporal_subsampling_type,
+            temporal_subsampling_factor=args.temporal_subsampling_factor,
+            temporal_subsampling_hidden_dim=subsampling_hidden_dim,
         )
     else:
         raise ValueError(f"Unsupported arch: {args.arch}")
     return model
+
+
+def project_input_lengths(model: nn.Module, input_lens: torch.Tensor) -> torch.Tensor:
+    if hasattr(model, "transform_input_lengths"):
+        return model.transform_input_lengths(input_lens)
+    return input_lens
 
 
 def main():
@@ -292,6 +311,10 @@ def main():
     p.add_argument("--letters_only", action="store_true")
     p.add_argument("--lowercase_phrases", action="store_true")
     p.add_argument("--dropout", type=float, default=0.0)
+    p.add_argument("--enable_temporal_subsampling", action="store_true")
+    p.add_argument("--temporal_subsampling_type", type=str, default="conv", choices=["conv", "avgpool", "maxpool"])
+    p.add_argument("--temporal_subsampling_factor", type=int, default=2, choices=[2, 4])
+    p.add_argument("--temporal_subsampling_hidden_dim", type=int, default=0)
 
     args = p.parse_args()
 
@@ -433,6 +456,8 @@ def main():
         losses = []
         blank_ratios = []
         in_tar_ratios = []
+        in_lens_before_means = []
+        in_lens_after_means = []
         pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{args.epochs}", leave=False)
 
         for batch in pbar:
@@ -440,10 +465,11 @@ def main():
                 continue
             X, Y, in_lens, tar_lens = batch
             X = X.to(device, non_blocking=True)
+            model_in_lens = project_input_lengths(model, in_lens)
 
             optimizer.zero_grad()
             log_probs = model(X)  # (T, B, C)
-            loss = criterion(log_probs, Y, in_lens, tar_lens)
+            loss = criterion(log_probs, Y, model_in_lens, tar_lens)
             loss.backward()
             if args.grad_clip_norm and args.grad_clip_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm)
@@ -453,8 +479,10 @@ def main():
                 pred_ids = torch.argmax(log_probs, dim=2)  # (T, B)
                 blank_mask = (pred_ids == blank_id).float()
                 blank_ratios.append(float(blank_mask.mean().item()))
-                ratio_vals = (in_lens.float() / tar_lens.float().clamp_min(1.0)).detach().cpu()
+                ratio_vals = (model_in_lens.float() / tar_lens.float().clamp_min(1.0)).detach().cpu()
                 in_tar_ratios.append(float(ratio_vals.mean().item()))
+                in_lens_before_means.append(float(in_lens.float().mean().item()))
+                in_lens_after_means.append(float(model_in_lens.float().mean().item()))
 
             loss_val = float(loss.item())
             losses.append(loss_val)
@@ -467,9 +495,14 @@ def main():
         mean_loss = float(sum(losses) / max(1, len(losses)))
         mean_blank_ratio = float(sum(blank_ratios) / max(1, len(blank_ratios)))
         mean_in_tar_ratio = float(sum(in_tar_ratios) / max(1, len(in_tar_ratios)))
+        mean_input_len_before = float(sum(in_lens_before_means) / max(1, len(in_lens_before_means)))
+        mean_input_len_after = float(sum(in_lens_after_means) / max(1, len(in_lens_after_means)))
         writer.add_scalar("loss/train", mean_loss, epoch)
+        writer.add_scalar("train/loss", mean_loss, epoch)
         writer.add_scalar("diag/blank_ratio_pred", mean_blank_ratio, epoch)
         writer.add_scalar("diag/input_target_len_ratio", mean_in_tar_ratio, epoch)
+        writer.add_scalar("diag/input_len_mean_before", mean_input_len_before, epoch)
+        writer.add_scalar("diag/input_len_mean_after", mean_input_len_after, epoch)
         print(f"Epoch {epoch + 1}: train loss={mean_loss:.4f}")
 
         train_metrics = None
@@ -480,21 +513,45 @@ def main():
             writer.add_scalar("sequence_accuracy/train", train_metrics["sequence_accuracy"], epoch)
             writer.add_scalar("avg_edit_distance/train", train_metrics["avg_edit_distance"], epoch)
 
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for batch in val_loader:
+                if batch is None:
+                    continue
+                Xv, Yv, in_lens_v, tar_lens_v = batch
+                Xv = Xv.to(device, non_blocking=True)
+                model_in_lens_v = project_input_lengths(model, in_lens_v)
+                log_probs_v = model(Xv)
+                val_losses.append(float(criterion(log_probs_v, Yv, model_in_lens_v, tar_lens_v).item()))
+
+        val_loss = float(sum(val_losses) / max(1, len(val_losses)))
         metrics = evaluate_metrics(model, val_loader, int_to_letter=int_to_letter, device=device, blank_id=blank_id)
+        writer.add_scalar("loss/val", val_loss, epoch)
+        writer.add_scalar("val/loss", val_loss, epoch)
         writer.add_scalar("cer/val", metrics["cer"], epoch)
+        writer.add_scalar("val/CER", metrics["cer"], epoch)
         writer.add_scalar("wer/val", metrics["wer"], epoch)
         writer.add_scalar("sequence_accuracy/val", metrics["sequence_accuracy"], epoch)
+        writer.add_scalar("val/sequence_accuracy", metrics["sequence_accuracy"], epoch)
         writer.add_scalar("avg_edit_distance/val", metrics["avg_edit_distance"], epoch)
 
         if wandb_enabled:
             payload = {
                 "epoch": epoch + 1,
                 "loss/train": mean_loss,
+                "train/loss": mean_loss,
+                "loss/val": val_loss,
+                "val/loss": val_loss,
                 "diag/blank_ratio_pred": mean_blank_ratio,
                 "diag/input_target_len_ratio": mean_in_tar_ratio,
+                "diag/input_len_mean_before": mean_input_len_before,
+                "diag/input_len_mean_after": mean_input_len_after,
                 "cer/val": metrics["cer"],
+                "val/CER": metrics["cer"],
                 "wer/val": metrics["wer"],
                 "sequence_accuracy/val": metrics["sequence_accuracy"],
+                "val/sequence_accuracy": metrics["sequence_accuracy"],
                 "avg_edit_distance/val": metrics["avg_edit_distance"],
                 "global_step": global_step,
             }
@@ -523,6 +580,9 @@ def main():
                 "train_loss": mean_loss,
                 "blank_ratio_pred": mean_blank_ratio,
                 "input_target_len_ratio": mean_in_tar_ratio,
+                "input_len_mean_before": mean_input_len_before,
+                "input_len_mean_after": mean_input_len_after,
+                "val_loss": val_loss,
                 "val_cer": metrics["cer"],
                 "val_wer": metrics["wer"],
                 "val_exact_match": metrics["sequence_accuracy"],

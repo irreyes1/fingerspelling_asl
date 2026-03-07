@@ -63,6 +63,9 @@ def _collect_predictions_and_targets(
             continue
         X, Y, input_lens, target_lens = batch
         X = X.to(device)
+        model_input_lens = input_lens
+        if hasattr(model, "transform_input_lengths"):
+            model_input_lens = model.transform_input_lengths(input_lens)
 
         outputs = model(X)  # (T, B, C)
         B = outputs.shape[1]
@@ -71,7 +74,7 @@ def _collect_predictions_and_targets(
         start = 0
         for i in range(B):
             # Decode prediction
-            valid_t = int(input_lens[i].item())
+            valid_t = int(model_input_lens[i].item())
             pred_text = ctc_greedy_decode(outputs[:valid_t, i, :], int_to_letter, blank_id)
 
             # Decode target

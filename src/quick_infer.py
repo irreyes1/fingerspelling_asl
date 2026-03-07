@@ -243,12 +243,15 @@ def main():
     print("Running inference...")
     with torch.no_grad():
         log_probs = model(X)  # (T, B, C)
+    model_input_lens = input_lens
+    if hasattr(model, "transform_input_lengths"):
+        model_input_lens = model.transform_input_lengths(input_lens)
 
     preds = greedy_decode_batch(
         log_probs,
         idx2char=idx2char,
         blank_id=blank_id,
-        input_lens=input_lens,
+        input_lens=model_input_lens,
     )
 
     # reconstruir GT desde Y concatenado

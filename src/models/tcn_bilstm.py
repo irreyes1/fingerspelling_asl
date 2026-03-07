@@ -1,8 +1,10 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from src.models.temporal_subsampling import TemporalSubsampling
 
 
 class TemporalBlock(nn.Module):
@@ -39,9 +41,22 @@ class TCNBiRNN(nn.Module):
         rnn_type: str,
         output_dim: int,
         bidirectional: bool = True,
+        enable_temporal_subsampling: bool = False,
+        temporal_subsampling_type: str = "conv",
+        temporal_subsampling_factor: int = 2,
+        temporal_subsampling_hidden_dim: Optional[int] = None,
     ):
         super().__init__()
-        self.input_proj = nn.Conv1d(input_dim, proj_dim, kernel_size=1)
+        self.input_dim = int(input_dim)
+        self.temporal_subsampling = TemporalSubsampling(
+            input_dim=input_dim,
+            enabled=enable_temporal_subsampling,
+            subsampling_type=temporal_subsampling_type,
+            factor=temporal_subsampling_factor,
+            hidden_dim=temporal_subsampling_hidden_dim,
+        )
+
+        self.input_proj = nn.Conv1d(self.temporal_subsampling.output_dim, proj_dim, kernel_size=1)
         self.tcn = nn.ModuleList(
             [
                 TemporalBlock(
@@ -65,7 +80,11 @@ class TCNBiRNN(nn.Module):
         rnn_out = rnn_hidden * (2 if bidirectional else 1)
         self.classifier = nn.Linear(rnn_out, output_dim)
 
+    def transform_input_lengths(self, input_lens: torch.Tensor) -> torch.Tensor:
+        return self.temporal_subsampling.transform_input_lengths(input_lens)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.temporal_subsampling(x)  # (B, T_sub, H_sub) or identity
         x = x.transpose(1, 2)  # (B, D, T)
         x = self.input_proj(x)  # (B, C, T)
         for block in self.tcn:
