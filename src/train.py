@@ -297,8 +297,8 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
 
-    # Model
-    input_dim = 63
+    # Model — 63 landmarks + 63 delta features = 126
+    input_dim = 126
     output_dim = max(int_to_letter.keys()) + 1
 
     model = EmbeddedRNN(input_dim, args.hidden_dim, output_dim).to(device)
@@ -334,6 +334,7 @@ def main():
         )
 
     global_step = 0
+    best_val_cer = float("inf")
     for epoch in range(args.epochs):
         model.train()
         losses = []
@@ -460,8 +461,24 @@ def main():
             f"AvgEditDist={metrics['avg_edit_distance']:.4f}"
         )
 
-        # Save checkpoint
-        ckpt_path = os.path.join("artifacts", "models", f"{run_name}_epoch{epoch + 1}.pt")
+        # Save best checkpoint (by val CER)
+        if metrics["cer"] < best_val_cer:
+            best_val_cer = metrics["cer"]
+            ckpt_path = os.path.join("artifacts", "models", f"{run_name}_best.pt")
+            os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
+            torch.save(
+                {
+                    "epoch": epoch + 1,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "config": vars(args),
+                },
+                ckpt_path,
+            )
+            print(f"  -> Saved best model (val CER={best_val_cer:.4f})")
+
+        # Save latest checkpoint (for resuming)
+        ckpt_path = os.path.join("artifacts", "models", f"{run_name}_latest.pt")
         os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
         torch.save(
             {

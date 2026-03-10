@@ -109,19 +109,28 @@ class ASLRightHandDataset(Dataset):
           X_raw = read_right_hand_sequence(parquet_path, sequence_id)  # (T, D)
 
           # Drop frames where ALL landmarks are NaN (hand not detected).
-          # Keeping them would feed all-zeros to the model and waste CTC steps.
           valid_mask = ~np.all(np.isnan(X_raw), axis=1)
           X_clean = X_raw[valid_mask]
 
           if len(X_clean) == 0:
               return None
 
+          # Zero remaining per-landmark NaN (rare)
+          X_clean = np.nan_to_num(X_clean, nan=0.0)
+
+          # Augmentation (training only, before normalize so shifts are in raw coords)
+          if self.training:
+              X_clean = augment(X_clean)
+
           input_len = min(len(X_clean), self.max_frames)
 
           X = normalize_frames(X_clean, self.max_frames)
-          # Zero remaining per-landmark NaN (rare: frame detected but one landmark missing)
-          X = np.nan_to_num(X, nan=0.0)
           X = normalize_landmarks(X)
+
+          # Delta features: frame-to-frame velocity
+          deltas = compute_deltas(X)
+          X = np.concatenate([X, deltas], axis=1)  # (T, 126)
+
           Y = torch.tensor(row["encoded"], dtype=torch.long)
           target_len = int(len(Y))
 
@@ -133,25 +142,36 @@ class ASLRightHandDataset(Dataset):
           return X, Y, int(min(input_len, self.max_frames)), target_len
 
 def augment(X: np.ndarray) -> np.ndarray:
-    """Simple data augmentation for training."""
-    # Time flip: reverse sequence
+    """Data augmentation for training. Applied BEFORE normalize_landmarks."""
+    # Temporal resample: stretch/compress (simulates different signing speeds)
     if np.random.random() < 0.5:
-      X = X[::-1].copy()
+        T = X.shape[0]
+        scale = np.random.uniform(0.8, 1.2)
+        new_T = max(1, int(T * scale))
+        indices = np.linspace(0, T - 1, new_T).astype(int)
+        X = X[indices]
 
-    # Temporal resample: stretch/compress
+    # Random spatial shift (simulates hand position variation)
     if np.random.random() < 0.5:
-      T = X.shape[0]
-      scale = np.random.uniform(0.7, 1.3)
-      new_T = max(1, int(T * scale))
-      indices = np.linspace(0, T - 1, new_T).astype(int)
-      X = X[indices]
+        shift = np.random.normal(0, 0.02, size=(1, X.shape[1])).astype(np.float32)
+        X = X + shift
 
-    # Random spatial shift
+    # Random scale jitter (simulates hand size / distance variation)
     if np.random.random() < 0.5:
-      shift = np.random.normal(0, 0.05, size=(1, X.shape[1])).astype(np.float32)
-      X = X + shift
+        scale = np.random.uniform(0.9, 1.1)
+        X = X * scale
 
     return X
+
+
+def compute_deltas(X: np.ndarray) -> np.ndarray:
+    """Compute frame-to-frame velocity (delta features).
+
+    X shape: (T, D) -> returns (T, D) with delta[t] = X[t] - X[t-1], delta[0] = 0.
+    """
+    deltas = np.zeros_like(X)
+    deltas[1:] = X[1:] - X[:-1]
+    return deltas
 
 def normalize_landmarks(X: np.ndarray) -> np.ndarray:
     """Center landmarks on wrist and scale by max absolute x/y value.
