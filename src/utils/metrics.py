@@ -56,9 +56,11 @@ def _collect_predictions_and_targets(
     int_to_letter: Dict[int, str],
     device: torch.device,
     blank_id: int = 0,
-) -> tuple[List[str], List[str]]:
+    loss_fn=None,
+) -> tuple[List[str], List[str], float]:
     preds: List[str] = []
     targets: List[str] = []
+    losses: List[float] = []
 
     for batch in dataloader:
         if batch is None:
@@ -69,6 +71,9 @@ def _collect_predictions_and_targets(
         outputs = model(X, input_lens)  # (T, B, C)
         B = outputs.shape[1]
         Y_list = Y.detach().cpu().tolist()
+
+        if loss_fn is not None:
+            losses.append(loss_fn(outputs, Y, input_lens, target_lens).item())
 
         start = 0
         for i in range(B):
@@ -87,7 +92,8 @@ def _collect_predictions_and_targets(
             preds.append(pred_text)
             targets.append(tgt_text)
 
-    return preds, targets
+    mean_loss = float(sum(losses) / max(1, len(losses)))
+    return preds, targets, mean_loss
 
 
 def _compute_wer(preds: List[str], targets: List[str]) -> float:
@@ -124,7 +130,7 @@ def evaluate_cer(
 ) -> float:
     model.eval()
     cer = CharErrorRate()
-    preds, targets = _collect_predictions_and_targets(
+    preds, targets, _ = _collect_predictions_and_targets(
         model=model,
         dataloader=dataloader,
         int_to_letter=int_to_letter,
@@ -144,16 +150,18 @@ def evaluate_metrics(
     int_to_letter: Dict[int, str],
     device: torch.device,
     blank_id: int = 0,
+    loss_fn=None,
 ) -> Dict[str, float]:
     model.eval()
     cer_metric = CharErrorRate()
 
-    preds, targets = _collect_predictions_and_targets(
+    preds, targets, loss = _collect_predictions_and_targets(
         model=model,
         dataloader=dataloader,
         int_to_letter=int_to_letter,
         device=device,
         blank_id=blank_id,
+        loss_fn=loss_fn
     )
 
     if len(preds) == 0:
@@ -162,6 +170,7 @@ def evaluate_metrics(
             "wer": float("nan"),
             "sequence_accuracy": float("nan"),
             "avg_edit_distance": float("nan"),
+            "loss": float("nan")
         }
 
     cer = float(cer_metric(preds, targets).item())
@@ -174,4 +183,5 @@ def evaluate_metrics(
         "wer": wer,
         "sequence_accuracy": seq_acc,
         "avg_edit_distance": avg_edit_distance,
+        "loss": loss
     }

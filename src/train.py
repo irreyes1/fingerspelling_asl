@@ -380,72 +380,76 @@ def main():
             global_step += 1
             pbar.set_postfix(loss=loss_val)
 
-        mean_loss = float(sum(losses) / max(1, len(losses)))
+        mean_train_loss = float(sum(losses) / max(1, len(losses)))
         mean_blank_ratio = float(sum(blank_ratios) / max(1, len(blank_ratios)))
         mean_in_tar_ratio = float(sum(in_tar_ratios) / max(1, len(in_tar_ratios)))
-        writer.add_scalar("loss/train", mean_loss, epoch)
+        writer.add_scalar("loss/train", mean_train_loss, epoch)
         writer.add_scalar("diag/blank_ratio_pred", mean_blank_ratio, epoch)
         writer.add_scalar("diag/input_target_len_ratio", mean_in_tar_ratio, epoch)
-        print(f"Epoch {epoch + 1}: train loss={mean_loss:.4f}")
+        print(f"Epoch {epoch + 1}: train loss={mean_train_loss:.4f}")
 
-        train_metrics = None
+        scheduler.step(mean_train_loss)
+
+        metrics_train = None
         if args.eval_train_metrics:
-            train_metrics = evaluate_metrics(
+            metrics_train = evaluate_metrics(
                 model,
                 train_loader,
                 int_to_letter=int_to_letter,
                 device=device,
                 blank_id=blank_id,
             )
-            writer.add_scalar("cer/train", train_metrics["cer"], epoch)
-            writer.add_scalar("wer/train", train_metrics["wer"], epoch)
-            writer.add_scalar("sequence_accuracy/train", train_metrics["sequence_accuracy"], epoch)
-            writer.add_scalar("avg_edit_distance/train", train_metrics["avg_edit_distance"], epoch)
-
+            writer.add_scalar("cer/train", metrics_train["cer"], epoch)
+            writer.add_scalar("wer/train", metrics_train["wer"], epoch)
+            writer.add_scalar("sequence_accuracy/train", metrics_train["sequence_accuracy"], epoch)
+            writer.add_scalar("avg_edit_distance/train", metrics_train["avg_edit_distance"], epoch)
+        
         # Validation metrics
-        metrics = evaluate_metrics(
+        metrics_val = evaluate_metrics(
             model,
             val_loader,
             int_to_letter=int_to_letter,
             device=device,
             blank_id=blank_id,
+            loss_fn=criterion,
         )
-        scheduler.step(mean_loss)
-        writer.add_scalar("cer/val", metrics["cer"], epoch)
-        writer.add_scalar("wer/val", metrics["wer"], epoch)
-        writer.add_scalar("sequence_accuracy/val", metrics["sequence_accuracy"], epoch)
-        writer.add_scalar("avg_edit_distance/val", metrics["avg_edit_distance"], epoch)
+        writer.add_scalar("loss/val", metrics_val["loss"], epoch)
+        writer.add_scalar("cer/val", metrics_val["cer"], epoch)
+        writer.add_scalar("wer/val", metrics_val["wer"], epoch)
+        writer.add_scalar("sequence_accuracy/val", metrics_val["sequence_accuracy"], epoch)
+        writer.add_scalar("avg_edit_distance/val", metrics_val["avg_edit_distance"], epoch)
 
         if wandb_enabled:
             payload = {
                 "epoch": epoch + 1,
-                "loss/train": mean_loss,
+                "loss/train": mean_train_loss,
+                "loss/val": metrics_val["loss"],
                 "diag/blank_ratio_pred": mean_blank_ratio,
                 "diag/input_target_len_ratio": mean_in_tar_ratio,
-                "cer/val": metrics["cer"],
-                "wer/val": metrics["wer"],
-                "sequence_accuracy/val": metrics["sequence_accuracy"],
-                "avg_edit_distance/val": metrics["avg_edit_distance"],
+                "cer/val": metrics_val["cer"],
+                "wer/val": metrics_val["wer"],
+                "sequence_accuracy/val": metrics_val["sequence_accuracy"],
+                "avg_edit_distance/val": metrics_val["avg_edit_distance"],
                 "global_step": global_step,
             }
-            if train_metrics is not None:
+            if metrics_train is not None:
                 payload.update(
                     {
-                        "cer/train": train_metrics["cer"],
-                        "wer/train": train_metrics["wer"],
-                        "sequence_accuracy/train": train_metrics["sequence_accuracy"],
-                        "avg_edit_distance/train": train_metrics["avg_edit_distance"],
+                        "cer/train": metrics_train["cer"],
+                        "wer/train": metrics_train["wer"],
+                        "sequence_accuracy/train": metrics_train["sequence_accuracy"],
+                        "avg_edit_distance/train": metrics_train["avg_edit_distance"],
                     }
                 )
             wandb.log(payload, step=global_step)
 
-        if train_metrics is not None:
+        if metrics_train is not None:
             print(
                 f"Epoch {epoch + 1}: "
-                f"train CER={train_metrics['cer']:.4f} | "
-                f"WER={train_metrics['wer']:.4f} | "
-                f"ExactMatch={train_metrics['sequence_accuracy']:.4f} | "
-                f"AvgEditDist={train_metrics['avg_edit_distance']:.4f}"
+                f"train CER={metrics_train['cer']:.4f} | "
+                f"WER={metrics_train['wer']:.4f} | "
+                f"ExactMatch={metrics_train['sequence_accuracy']:.4f} | "
+                f"AvgEditDist={metrics_train['avg_edit_distance']:.4f}"
             )
         print(
             f"Epoch {epoch + 1}: "
@@ -455,15 +459,16 @@ def main():
 
         print(
             f"Epoch {epoch + 1}: "
-            f"val CER={metrics['cer']:.4f} | "
-            f"WER={metrics['wer']:.4f} | "
-            f"ExactMatch={metrics['sequence_accuracy']:.4f} | "
-            f"AvgEditDist={metrics['avg_edit_distance']:.4f}"
+            f"val loss={metrics_val['loss']:.4f} | "
+            f"val CER={metrics_val['cer']:.4f} | "
+            f"WER={metrics_val['wer']:.4f} | "
+            f"ExactMatch={metrics_val['sequence_accuracy']:.4f} | "
+            f"AvgEditDist={metrics_val['avg_edit_distance']:.4f}"
         )
 
         # Save best checkpoint (by val CER)
-        if metrics["cer"] < best_val_cer:
-            best_val_cer = metrics["cer"]
+        if metrics_val["cer"] < best_val_cer:
+            best_val_cer = metrics_val["cer"]
             ckpt_path = os.path.join("artifacts", "models", f"{run_name}_best.pt")
             os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
             torch.save(
