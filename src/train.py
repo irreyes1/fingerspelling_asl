@@ -141,6 +141,7 @@ def main():
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch_size", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--weight_decay", type=float, default=0)
     p.add_argument("--hidden_dim", type=int, default=256)
     p.add_argument("--proj_dim", type=int, default=128)
     p.add_argument("--tcn_kernels", type=str, default="3,3,3", help="Comma-separated kernel sizes for TCN blocks")
@@ -304,7 +305,7 @@ def main():
     model = EmbeddedRNN(input_dim, args.hidden_dim, output_dim).to(device)
 
     criterion = nn.CTCLoss(blank=blank_id, zero_infinity=True)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=3,
     )
