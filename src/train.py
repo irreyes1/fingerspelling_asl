@@ -141,6 +141,9 @@ def main():
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch_size", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--weight_decay", type=float, default=1e-4, help="L2 regularization (Adam weight_decay)")
+    p.add_argument("--dropout", type=float, default=0.5, help="Dropout rate for model")
+    p.add_argument("--early_stopping_patience", type=int, default=10, help="Stop if val CER doesn't improve for N epochs (0=disabled)")
     p.add_argument("--hidden_dim", type=int, default=256)
     p.add_argument("--proj_dim", type=int, default=128)
     p.add_argument("--tcn_kernels", type=str, default="3,3,3", help="Comma-separated kernel sizes for TCN blocks")
@@ -301,10 +304,10 @@ def main():
     input_dim = 126
     output_dim = max(int_to_letter.keys()) + 1
 
-    model = EmbeddedRNN(input_dim, args.hidden_dim, output_dim).to(device)
+    model = EmbeddedRNN(input_dim, args.hidden_dim, output_dim, dropout=args.dropout).to(device)
 
     criterion = nn.CTCLoss(blank=blank_id, zero_infinity=True)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=3,
     )
@@ -335,6 +338,7 @@ def main():
 
     global_step = 0
     best_val_cer = float("inf")
+    epochs_without_improvement = 0
     for epoch in range(args.epochs):
         model.train()
         losses = []
@@ -386,7 +390,8 @@ def main():
         writer.add_scalar("loss/train", mean_loss, epoch)
         writer.add_scalar("diag/blank_ratio_pred", mean_blank_ratio, epoch)
         writer.add_scalar("diag/input_target_len_ratio", mean_in_tar_ratio, epoch)
-        print(f"Epoch {epoch + 1}: train loss={mean_loss:.4f}")
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"Epoch {epoch + 1}: train loss={mean_loss:.4f} | lr={current_lr:.6f}")
 
         train_metrics = None
         if args.eval_train_metrics:
@@ -410,7 +415,7 @@ def main():
             device=device,
             blank_id=blank_id,
         )
-        scheduler.step(mean_loss)
+        scheduler.step(metrics["cer"])
         writer.add_scalar("cer/val", metrics["cer"], epoch)
         writer.add_scalar("wer/val", metrics["wer"], epoch)
         writer.add_scalar("sequence_accuracy/val", metrics["sequence_accuracy"], epoch)
@@ -464,6 +469,7 @@ def main():
         # Save best checkpoint (by val CER)
         if metrics["cer"] < best_val_cer:
             best_val_cer = metrics["cer"]
+            epochs_without_improvement = 0
             ckpt_path = os.path.join("artifacts", "models", f"{run_name}_best.pt")
             os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
             torch.save(
@@ -476,6 +482,8 @@ def main():
                 ckpt_path,
             )
             print(f"  -> Saved best model (val CER={best_val_cer:.4f})")
+        else:
+            epochs_without_improvement += 1
 
         # Save latest checkpoint (for resuming)
         ckpt_path = os.path.join("artifacts", "models", f"{run_name}_latest.pt")
@@ -489,6 +497,12 @@ def main():
             },
             ckpt_path,
         )
+
+        # Early stopping
+        if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
+            print(f"Early stopping: val CER did not improve for {args.early_stopping_patience} epochs. "
+                  f"Best val CER={best_val_cer:.4f}")
+            break
 
     if wandb_enabled:
         log_examples_to_wandb(
