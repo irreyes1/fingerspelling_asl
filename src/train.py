@@ -1,6 +1,7 @@
-import os
-import json
 import argparse
+import json
+import os
+import re
 from datetime import datetime
 from typing import List, Tuple
 
@@ -10,18 +11,17 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-import re
 
 try:
     import wandb
 except ImportError:
     wandb = None
 
-from src.models.tcn_bilstm import TCNBiRNN
-from src.models.embedded_rnn import EmbeddedRNN
 from src.data.dataset import ASLRightHandDataset, collate_fn
 from src.data.vocab import build_ctc_vocab, encode_phrase
-from src.utils.metrics import evaluate_metrics, ctc_greedy_decode
+from src.models.embedded_rnn import EmbeddedRNN
+from src.models.tcn_bilstm import TCNBiRNN
+from src.utils.metrics import ctc_greedy_decode, evaluate_metrics
 
 
 def split_by_participant(df: pd.DataFrame, val_ratio: float = 0.2, seed: int = 42):
@@ -82,11 +82,15 @@ def collect_gt_pred_examples(
             start = 0
             for i in range(batch_size):
                 valid_t = int(input_lens[i].item())
-                pred_text = ctc_greedy_decode(outputs[:valid_t, i, :], int_to_letter, blank_id)
+                pred_text = ctc_greedy_decode(
+                    outputs[:valid_t, i, :], int_to_letter, blank_id
+                )
                 target_len = int(target_lens[i].item())
-                tgt_ids = y_list[start:start + target_len]
+                tgt_ids = y_list[start : start + target_len]
                 start += target_len
-                tgt_text = "".join(int_to_letter.get(int(t), "") for t in tgt_ids if int(t) != blank_id)
+                tgt_text = "".join(
+                    int_to_letter.get(int(t), "") for t in tgt_ids if int(t) != blank_id
+                )
                 examples.append((tgt_text, pred_text))
                 if len(examples) >= n_examples:
                     return examples
@@ -141,22 +145,39 @@ def main():
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch_size", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--weight_decay", type=float, default=1e-4, help="L2 regularization (Adam weight_decay)")
+    p.add_argument(
+        "--weight_decay",
+        type=float,
+        default=1e-4,
+        help="L2 regularization (Adam weight_decay)",
+    )
     p.add_argument("--dropout", type=float, default=0.5, help="Dropout rate for model")
-    p.add_argument("--early_stopping_patience", type=int, default=10, help="Stop if val CER doesn't improve for N epochs (0=disabled)")
+    p.add_argument(
+        "--early_stopping_patience",
+        type=int,
+        default=10,
+        help="Stop if val CER doesn't improve for N epochs (0=disabled)",
+    )
     p.add_argument("--hidden_dim", type=int, default=256)
     p.add_argument("--proj_dim", type=int, default=128)
-    p.add_argument("--tcn_kernels", type=str, default="3,3,3", help="Comma-separated kernel sizes for TCN blocks")
+    p.add_argument(
+        "--tcn_kernels",
+        type=str,
+        default="3,3,3",
+        help="Comma-separated kernel sizes for TCN blocks",
+    )
     p.add_argument("--rnn_layers", type=int, default=2)
-    p.add_argument("--rnn_type", type=str, default="lstm", choices=["lstm", "gru", "rnn"])
+    p.add_argument(
+        "--rnn_type", type=str, default="lstm", choices=["lstm", "gru", "rnn"]
+    )
     p.add_argument("--val_ratio", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--train_size", type=int, default=200)  # small by default
     p.add_argument("--val_size", type=int, default=200)
     p.add_argument(
-          "--use_supplemental",
-          action="store_true",
-          help="Also load supplemental_metadata.csv + supplemental_landmarks/.",
+        "--use_supplemental",
+        action="store_true",
+        help="Also load supplemental_metadata.csv + supplemental_landmarks/.",
     )
     p.add_argument(
         "--max_phrase_len",
@@ -181,8 +202,15 @@ def main():
     p.add_argument("--wandb_project", type=str, default="fingerspelling_asl")
     p.add_argument("--wandb_entity", type=str, default=None)
     p.add_argument("--wandb_run_name", type=str, default=None)
-    p.add_argument("--wandb_mode", type=str, default="online", choices=["online", "offline", "disabled"])
-    p.add_argument("--wandb_tags", type=str, default="", help="Comma-separated tags for W&B")
+    p.add_argument(
+        "--wandb_mode",
+        type=str,
+        default="online",
+        choices=["online", "offline", "disabled"],
+    )
+    p.add_argument(
+        "--wandb_tags", type=str, default="", help="Comma-separated tags for W&B"
+    )
 
     args = p.parse_args()
 
@@ -221,34 +249,41 @@ def main():
             f"Download a few like 0.parquet, 1.parquet, etc."
         )
     df = df[df["file_id"].isin(have_ids)].copy()
-    print(f"Rows after filtering to available parquets ({len(have_ids)} file_ids): {len(df)}")
+    print(
+        f"Rows after filtering to available parquets ({len(have_ids)} file_ids): {len(df)}"
+    )
 
     if args.use_supplemental:
         supp_csv = os.path.join(args.data_dir, "supplemental_metadata.csv")
         supp_landmarks = os.path.join(args.data_dir, "supplemental_landmarks")
         if os.path.exists(supp_csv) and os.path.isdir(supp_landmarks):
-          supp_df = pd.read_csv(supp_csv)
-          supp_have = existing_file_ids(supp_landmarks)
-          supp_df = supp_df[supp_df["file_id"].isin(supp_have)].copy()
-          supp_df["_landmarks_dir"] = supp_landmarks
-          print(f"Supplemental rows: {len(supp_df)} ({len(supp_have)} file_ids)")
-          df["_landmarks_dir"] = landmarks_dir
-          df = pd.concat([df, supp_df], ignore_index=True)
-          print(f"Combined total rows: {len(df)}")
+            supp_df = pd.read_csv(supp_csv)
+            supp_have = existing_file_ids(supp_landmarks)
+            supp_df = supp_df[supp_df["file_id"].isin(supp_have)].copy()
+            supp_df["_landmarks_dir"] = supp_landmarks
+            print(f"Supplemental rows: {len(supp_df)} ({len(supp_have)} file_ids)")
+            df["_landmarks_dir"] = landmarks_dir
+            df = pd.concat([df, supp_df], ignore_index=True)
+            print(f"Combined total rows: {len(df)}")
         else:
-          print(f"Warning: supplemental data not found at {supp_csv}, skipping")
+            print(f"Warning: supplemental data not found at {supp_csv}, skipping")
 
-    _clean_re = re.compile(r'^[a-z ]+$')
+    _clean_re = re.compile(r"^[a-z ]+$")
     df["phrase"] = df["phrase"].astype(str).str.lower().str.strip()
-    df = df[df["phrase"].apply(lambda x: bool(_clean_re.match(x)) and len(x) > 0)].copy()
+    df = df[
+        df["phrase"].apply(lambda x: bool(_clean_re.match(x)) and len(x) > 0)
+    ].copy()
     print(f"Rows after filtering to letters-only phrases: {len(df)}")
 
     # Pre-filter: remove sequences with no right-hand data (all NaN).
     # These are left-hand signers or detection failures — waste of training time.
-    from src.data.dataset import read_right_hand_sequence, count_valid_frames
+    from src.data.dataset import count_valid_frames, read_right_hand_sequence
+
     print("Pre-filtering sequences with no right-hand landmarks...")
     valid_mask = []
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Checking landmarks", leave=False):
+    for _, row in tqdm(
+        df.iterrows(), total=len(df), desc="Checking landmarks", leave=False
+    ):
         fid = int(row["file_id"])
         sid = int(row["sequence_id"])
         lm_dir = landmarks_dir
@@ -266,24 +301,34 @@ def main():
 
     if args.max_phrase_len > 0:
         df = df[df["phrase"].astype(str).str.len() <= args.max_phrase_len].copy()
-        print(f"Rows after filtering by max_phrase_len={args.max_phrase_len}: {len(df)}")
+        print(
+            f"Rows after filtering by max_phrase_len={args.max_phrase_len}: {len(df)}"
+        )
         if len(df) == 0:
             raise ValueError("No rows left after max_phrase_len filtering.")
 
     if args.overfit_subset > 0:
         n_subset = min(args.overfit_subset, len(df))
         overfit_df = df.sample(n=n_subset, random_state=args.seed).copy()
-        overfit_df["encoded"] = overfit_df["phrase"].apply(lambda x: encode_phrase(str(x), letter_to_int))
+        overfit_df["encoded"] = overfit_df["phrase"].apply(
+            lambda x: encode_phrase(str(x), letter_to_int)
+        )
         train_df = overfit_df.copy()
         val_df = overfit_df.copy()
         print(f"Overfit mode enabled: using same {n_subset} samples for train and val")
     else:
         # Split by participant_id
-        train_df, val_df = split_by_participant(df, val_ratio=args.val_ratio, seed=args.seed)
+        train_df, val_df = split_by_participant(
+            df, val_ratio=args.val_ratio, seed=args.seed
+        )
 
         # Encode targets
-        train_df["encoded"] = train_df["phrase"].apply(lambda x: encode_phrase(str(x), letter_to_int))
-        val_df["encoded"] = val_df["phrase"].apply(lambda x: encode_phrase(str(x), letter_to_int))
+        train_df["encoded"] = train_df["phrase"].apply(
+            lambda x: encode_phrase(str(x), letter_to_int)
+        )
+        val_df["encoded"] = val_df["phrase"].apply(
+            lambda x: encode_phrase(str(x), letter_to_int)
+        )
 
         # Sample small subsets for local dev
         if args.train_size and args.train_size < len(train_df):
@@ -294,22 +339,53 @@ def main():
     print(f"Train samples: {len(train_df)} | Val samples: {len(val_df)}")
 
     # Datasets / loaders
-    train_ds = ASLRightHandDataset(train_df, landmarks_dir=landmarks_dir, max_frames=args.max_frames, use_per_row_dir=args.use_supplemental, training=True)
-    val_ds = ASLRightHandDataset(val_df, landmarks_dir=landmarks_dir, max_frames=args.max_frames, use_per_row_dir=args.use_supplemental, training=False)
+    train_ds = ASLRightHandDataset(
+        train_df,
+        landmarks_dir=landmarks_dir,
+        max_frames=args.max_frames,
+        use_per_row_dir=args.use_supplemental,
+        training=True,
+    )
+    val_ds = ASLRightHandDataset(
+        val_df,
+        landmarks_dir=landmarks_dir,
+        max_frames=args.max_frames,
+        use_per_row_dir=args.use_supplemental,
+        training=False,
+    )
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=0,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=0,
+    )
 
     # Model — 63 landmarks + 63 delta features = 126
     input_dim = 126
     output_dim = max(int_to_letter.keys()) + 1
 
-    model = EmbeddedRNN(input_dim, args.hidden_dim, output_dim, dropout=args.dropout).to(device)
+    model = EmbeddedRNN(
+        input_dim, args.hidden_dim, output_dim, dropout=args.dropout
+    ).to(device)
 
     criterion = nn.CTCLoss(blank=blank_id, zero_infinity=True)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3,
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=3,
     )
 
     # Tracking setup
@@ -371,7 +447,9 @@ def main():
                 pred_ids = torch.argmax(log_probs, dim=2)  # (T, B)
                 blank_mask = (pred_ids == blank_id).float()
                 blank_ratios.append(float(blank_mask.mean().item()))
-                ratio_vals = (in_lens.float() / tar_lens.float().clamp_min(1.0)).detach().cpu()
+                ratio_vals = (
+                    (in_lens.float() / tar_lens.float().clamp_min(1.0)).detach().cpu()
+                )
                 in_tar_ratios.append(float(ratio_vals.mean().item()))
 
             loss_val = float(loss.item())
@@ -379,91 +457,111 @@ def main():
 
             writer.add_scalar("loss/train_step", loss_val, global_step)
             if wandb_enabled:
-                wandb.log({"loss/train_step": loss_val, "global_step": global_step}, step=global_step)
+                wandb.log(
+                    {"loss/train_step": loss_val, "global_step": global_step},
+                    step=global_step,
+                )
 
             global_step += 1
             pbar.set_postfix(loss=loss_val)
 
-        mean_loss = float(sum(losses) / max(1, len(losses)))
+        mean_train_loss = float(sum(losses) / max(1, len(losses)))
         mean_blank_ratio = float(sum(blank_ratios) / max(1, len(blank_ratios)))
         mean_in_tar_ratio = float(sum(in_tar_ratios) / max(1, len(in_tar_ratios)))
-        writer.add_scalar("loss/train", mean_loss, epoch)
+        writer.add_scalar("loss/train", mean_train_loss, epoch)
         writer.add_scalar("diag/blank_ratio_pred", mean_blank_ratio, epoch)
         writer.add_scalar("diag/input_target_len_ratio", mean_in_tar_ratio, epoch)
-        current_lr = optimizer.param_groups[0]["lr"]
-        print(f"Epoch {epoch + 1}: train loss={mean_loss:.4f} | lr={current_lr:.6f}")
+        print(f"Epoch {epoch + 1}: train loss={mean_train_loss:.4f}")
 
-        train_metrics = None
+        metrics_train = None
         if args.eval_train_metrics:
-            train_metrics = evaluate_metrics(
+            metrics_train = evaluate_metrics(
                 model,
                 train_loader,
                 int_to_letter=int_to_letter,
                 device=device,
                 blank_id=blank_id,
             )
-            writer.add_scalar("cer/train", train_metrics["cer"], epoch)
-            writer.add_scalar("wer/train", train_metrics["wer"], epoch)
-            writer.add_scalar("sequence_accuracy/train", train_metrics["sequence_accuracy"], epoch)
-            writer.add_scalar("avg_edit_distance/train", train_metrics["avg_edit_distance"], epoch)
+            writer.add_scalar("cer/train", metrics_train["cer"], epoch)
+            writer.add_scalar("wer/train", metrics_train["wer"], epoch)
+            writer.add_scalar(
+                "sequence_accuracy/train", metrics_train["sequence_accuracy"], epoch
+            )
+            writer.add_scalar(
+                "avg_edit_distance/train", metrics_train["avg_edit_distance"], epoch
+            )
 
         # Validation metrics
-        metrics = evaluate_metrics(
+        metrics_val = evaluate_metrics(
             model,
             val_loader,
             int_to_letter=int_to_letter,
             device=device,
             blank_id=blank_id,
+            loss_fn=criterion,
         )
-        scheduler.step(metrics["cer"])
-        writer.add_scalar("cer/val", metrics["cer"], epoch)
-        writer.add_scalar("wer/val", metrics["wer"], epoch)
-        writer.add_scalar("sequence_accuracy/val", metrics["sequence_accuracy"], epoch)
-        writer.add_scalar("avg_edit_distance/val", metrics["avg_edit_distance"], epoch)
+        writer.add_scalar("loss/val", metrics_val["loss"], epoch)
+        writer.add_scalar("cer/val", metrics_val["cer"], epoch)
+        writer.add_scalar("wer/val", metrics_val["wer"], epoch)
+        writer.add_scalar(
+            "sequence_accuracy/val", metrics_val["sequence_accuracy"], epoch
+        )
+        writer.add_scalar(
+            "avg_edit_distance/val", metrics_val["avg_edit_distance"], epoch
+        )
+
+        current_lr = optimizer.param_groups[0]["lr"]
+        writer.add_scalar("learning_rate", current_lr, epoch)
+        scheduler.step(metrics_val["loss"])
+        # scheduler.step(metrics_val["cer"])
 
         if wandb_enabled:
             payload = {
                 "epoch": epoch + 1,
-                "loss/train": mean_loss,
+                "loss/train": mean_train_loss,
+                "loss/val": metrics_val["loss"],
                 "diag/blank_ratio_pred": mean_blank_ratio,
                 "diag/input_target_len_ratio": mean_in_tar_ratio,
-                "cer/val": metrics["cer"],
-                "wer/val": metrics["wer"],
-                "sequence_accuracy/val": metrics["sequence_accuracy"],
-                "avg_edit_distance/val": metrics["avg_edit_distance"],
+                "cer/val": metrics_val["cer"],
+                "wer/val": metrics_val["wer"],
+                "sequence_accuracy/val": metrics_val["sequence_accuracy"],
+                "avg_edit_distance/val": metrics_val["avg_edit_distance"],
                 "global_step": global_step,
+                "lr": current_lr,
             }
-            if train_metrics is not None:
+            if metrics_train is not None:
                 payload.update(
                     {
-                        "cer/train": train_metrics["cer"],
-                        "wer/train": train_metrics["wer"],
-                        "sequence_accuracy/train": train_metrics["sequence_accuracy"],
-                        "avg_edit_distance/train": train_metrics["avg_edit_distance"],
+                        "cer/train": metrics_train["cer"],
+                        "wer/train": metrics_train["wer"],
+                        "sequence_accuracy/train": metrics_train["sequence_accuracy"],
+                        "avg_edit_distance/train": metrics_train["avg_edit_distance"],
                     }
                 )
             wandb.log(payload, step=global_step)
 
-        if train_metrics is not None:
+        if metrics_train is not None:
             print(
                 f"Epoch {epoch + 1}: "
-                f"train CER={train_metrics['cer']:.4f} | "
-                f"WER={train_metrics['wer']:.4f} | "
-                f"ExactMatch={train_metrics['sequence_accuracy']:.4f} | "
-                f"AvgEditDist={train_metrics['avg_edit_distance']:.4f}"
+                f"train CER={metrics_train['cer']:.4f} | "
+                f"WER={metrics_train['wer']:.4f} | "
+                f"ExactMatch={metrics_train['sequence_accuracy']:.4f} | "
+                f"AvgEditDist={metrics_train['avg_edit_distance']:.4f}"
             )
         print(
             f"Epoch {epoch + 1}: "
+            f"lr={current_lr:.4f} | "
             f"diag blank_ratio_pred={mean_blank_ratio:.4f} | "
             f"input/target ratio={mean_in_tar_ratio:.2f}"
         )
 
         print(
             f"Epoch {epoch + 1}: "
-            f"val CER={metrics['cer']:.4f} | "
-            f"WER={metrics['wer']:.4f} | "
-            f"ExactMatch={metrics['sequence_accuracy']:.4f} | "
-            f"AvgEditDist={metrics['avg_edit_distance']:.4f}"
+            f"val loss={metrics_val['loss']:.4f} | "
+            f"val CER={metrics_val['cer']:.4f} | "
+            f"WER={metrics_val['wer']:.4f} | "
+            f"ExactMatch={metrics_val['sequence_accuracy']:.4f} | "
+            f"AvgEditDist={metrics_val['avg_edit_distance']:.4f}"
         )
 
         # Save best checkpoint (by val CER)
@@ -499,9 +597,14 @@ def main():
         )
 
         # Early stopping
-        if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
-            print(f"Early stopping: val CER did not improve for {args.early_stopping_patience} epochs. "
-                  f"Best val CER={best_val_cer:.4f}")
+        if (
+            args.early_stopping_patience > 0
+            and epochs_without_improvement >= args.early_stopping_patience
+        ):
+            print(
+                f"Early stopping: val CER did not improve for {args.early_stopping_patience} epochs. "
+                f"Best val CER={best_val_cer:.4f}"
+            )
             break
 
     if wandb_enabled:
