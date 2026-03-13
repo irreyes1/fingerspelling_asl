@@ -392,6 +392,7 @@ def main():
         factor=0.5,
         patience=3,
     )
+    scaler = torch.cuda.amp.GradScaler(enabled=use_cuda)
 
     # Tracking setup
     run_name = args.run_name or datetime.now().strftime("run_%Y%m%d_%H%M%S")
@@ -434,18 +435,20 @@ def main():
             X = X.to(device)
 
             optimizer.zero_grad()
-            log_probs = model(X, in_lens)  # (T, B, C)
-
-            loss = criterion(log_probs, Y, in_lens, tar_lens)
+            with torch.autocast(device_type=device.type, enabled=use_cuda):
+                log_probs = model(X, in_lens)  # (T, B, C)
+                loss = criterion(log_probs, Y, in_lens, tar_lens)
 
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"WARNING: skipping batch with loss={loss.item()}")
                 optimizer.zero_grad()
                 continue
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             # Simple diagnostics: blank-token dominance and input/target length ratio.
             with torch.no_grad():
