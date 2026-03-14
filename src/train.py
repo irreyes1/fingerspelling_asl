@@ -512,8 +512,7 @@ def main():
 
         current_lr = optimizer.param_groups[0]["lr"]
         writer.add_scalar("learning_rate", current_lr, epoch)
-        scheduler.step(metrics_val["loss"])
-        # scheduler.step(metrics_val["cer"])
+        scheduler.step(metrics_val["cer"])
 
         if wandb_enabled:
             payload = {
