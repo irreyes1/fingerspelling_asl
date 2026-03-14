@@ -17,6 +17,11 @@ try:
 except ImportError:
     wandb = None
 
+try:
+    from clearml import Task
+except ImportError:
+    Task = None
+
 from src.data.dataset import ASLRightHandDataset, collate_fn
 from src.data.vocab import build_ctc_vocab, encode_phrase
 from src.models.embedded_rnn import EmbeddedRNN
@@ -170,6 +175,7 @@ def main():
     p.add_argument(
         "--rnn_type", type=str, default="lstm", choices=["lstm", "gru", "rnn"]
     )
+    p.add_argument("--num_workers", type=int, default=2, help="DataLoader worker processes for parallel data loading")
     p.add_argument("--val_ratio", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--train_size", type=int, default=200)  # small by default
@@ -213,6 +219,16 @@ def main():
     )
 
     args = p.parse_args()
+
+    # ClearML experiment tracking & queue integration
+    # Appends short task ID to run_name to prevent checkpoint overwrites across runs
+    if Task is not None:
+        _task = Task.init(
+            project_name="fingerspelling_asl",
+            task_name=args.run_name or "train",
+            task_type=Task.TaskTypes.training,
+        )
+        args.run_name = f"{args.run_name or 'train'}_{_task.id[:8]}"
 
     train_csv = args.train_csv
     if not os.path.isabs(train_csv):
@@ -354,20 +370,9 @@ def main():
         training=False,
     )
 
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=0,
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=args.batch_size,
-        shuffle=False,
-        collate_fn=collate_fn,
-        num_workers=0,
-    )
+    use_cuda = device.type == "cuda"
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=args.num_workers, pin_memory=use_cuda, persistent_workers=args.num_workers > 0)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=args.num_workers, pin_memory=use_cuda, persistent_workers=args.num_workers > 0)
 
     # Model — 63 landmarks + 63 delta features = 126
     input_dim = 126
@@ -387,6 +392,7 @@ def main():
         factor=0.5,
         patience=3,
     )
+    scaler = torch.cuda.amp.GradScaler(enabled=use_cuda)
 
     # Tracking setup
     run_name = args.run_name or datetime.now().strftime("run_%Y%m%d_%H%M%S")
@@ -429,18 +435,20 @@ def main():
             X = X.to(device)
 
             optimizer.zero_grad()
-            log_probs = model(X, in_lens)  # (T, B, C)
-
-            loss = criterion(log_probs, Y, in_lens, tar_lens)
+            with torch.autocast(device_type=device.type, enabled=use_cuda):
+                log_probs = model(X, in_lens)  # (T, B, C)
+                loss = criterion(log_probs, Y, in_lens, tar_lens)
 
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"WARNING: skipping batch with loss={loss.item()}")
                 optimizer.zero_grad()
                 continue
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             # Simple diagnostics: blank-token dominance and input/target length ratio.
             with torch.no_grad():
@@ -512,8 +520,7 @@ def main():
 
         current_lr = optimizer.param_groups[0]["lr"]
         writer.add_scalar("learning_rate", current_lr, epoch)
-        scheduler.step(metrics_val["loss"])
-        # scheduler.step(metrics_val["cer"])
+        scheduler.step(metrics_val["cer"])
 
         if wandb_enabled:
             payload = {
