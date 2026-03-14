@@ -64,7 +64,27 @@ Flags utiles:
 - `src/models/tcn_bilstm.py`: arquitectura del run final `archcmp2_tcn_bilstm_full_20260303`.
 - `src/model_loader.py`: factory que detecta la arquitectura del checkpoint y carga el modelo correcto.
 
-## 5) Inferencia rapida de checkpoint
+## 5) Evaluacion / Test
+
+Evalua un checkpoint entrenado sobre el conjunto suplemental (participantes no vistos en entrenamiento — zero leakage).
+
+> **Requisito:** el checkpoint debe haber sido entrenado **sin** `--use_supplemental` (si no, las metricas no son validas).
+
+Comando base:
+```bash
+python -m src.evaluate \
+    --ckpt artifacts/models/<checkpoint>.pt \
+    --data_dir data/asl-fingerspelling
+```
+
+Flags utiles:
+- `--batch_size <N>` (default: 64)
+- `--num_workers <N>` (default: 0)
+- `--n_examples <N>` — numero de ejemplos GT/PRED a imprimir (default: 10)
+
+Metricas reportadas: **CER**, **WER**, **Exact Match**, **Avg Edit Distance**.
+
+## 5.1) Inferencia rapida de checkpoint
 ```bash
 python -m src.quick_infer --ckpt artifacts/models/<checkpoint>.pt --n 16
 ```
