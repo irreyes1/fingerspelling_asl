@@ -11,8 +11,12 @@
 
 ## Notes / Suggestions
 
+---
 
-### Mixed Precision Training (`torch.amp`) — Suggestion Implemented in experiment #3 onwards...
+### Mixed Precision Training (`torch.amp`)
+
+_Suggestion Implemented in experiment #3 onwards..._
+
 Adding mixed precision (FP16) to the training loop would yield ~2x speedup on the NVIDIA L4 with no impact on model quality. This is a code change, not a hyperparameter change, so it applies to all future runs. Implementation:
 
 ```python
@@ -26,7 +30,22 @@ scaler.scale(loss).backward()
 scaler.step(optimizer)
 scaler.update()
 ```
+
 **Expected result:** This would halve experiment execution time (from ~2.6h to ~1.3h), allowing faster iteration across runs.
+
+**Actual result:** Training 75 epochs took ~4hs
+
+---
+
+### Scheduler now monitors val CER (commit `8d60549`, 2026-03-14)
+
+_Experiments #4 and onwards will run with this change._
+
+Merged from `irreyes1/main` (author: Pau Vila). The intended change was:
+
+- **`scheduler.step(metrics_val["cer"])`** replaces `scheduler.step(metrics_val["loss"])` — `ReduceLROnPlateau` now reduces LR when val CER stops improving instead of val loss. This is a better signal since CER is the actual evaluation metric.
+
+**Expected result:** CTC loss can decrease while CER stays flat or worsens — the model may be learning to distribute probability mass more smoothly without actually producing better character sequences. Monitoring CER directly ensures the LR is reduced when what we actually care about stops improving.
 
 ---
 
