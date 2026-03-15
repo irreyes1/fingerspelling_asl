@@ -297,7 +297,10 @@ Optionally pass `--wandb_project <project_name>` and `--wandb_tags <tag1,tag2>` 
 ```bash
 python -m src.evaluate \
        --ckpt artifacts/models/run_best.pt \
-       --data_dir data/asl-fingerspelling
+       --data_dir data/asl-fingerspelling \
+       --batch_size 128 \ 
+       --n_examples 10 \
+       --num_workers  4
 ```
 
 ### Real-Time Webcam Inference
@@ -324,6 +327,8 @@ python -m src.quick_infer \
 
 - *Kaggle Notebook: https://www.kaggle.com/code/sscalzadonnaupc/notebook136616d653-v12-landmarks*
 
+- *LightningAI studio: https://lightning.ai//inference-optimization-project/studios/notebook13/code?turnOn=true*
+- 
 - *W&B Workspace report: https://wandb.ai/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/fingerspelling_asl*
 
 - *ClearML: https://app.clear.ml/projects/f7947bf18c6d48039162f95680b94cab/tasks/9a635b0548e941dbab846fd54d52826d/hyper-params/hyper-param/Args*
