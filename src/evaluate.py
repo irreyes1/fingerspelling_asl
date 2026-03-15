@@ -65,6 +65,10 @@ def main():
     p.add_argument(
         "--n_examples", type=int, default=10, help="Number of GT/PRED examples to print"
     )
+    p.add_argument(
+        "--max_samples", type=int, default=None,
+        help="If set, randomly subsample this many rows before the landmark check (speeds up quick runs)"
+    )
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -118,6 +122,10 @@ def main():
     df["phrase"] = df["phrase"].astype(str).str.lower().str.strip()
     df = df[df["phrase"].apply(lambda x: bool(_clean_re.match(x)) and len(x) > 0)].copy()
     print(f"Rows after filtering to letters-only phrases: {len(df)}")
+
+    if args.max_samples is not None and args.max_samples < len(df):
+        df = df.sample(n=args.max_samples, random_state=42).reset_index(drop=True)
+        print(f"Subsampled to {len(df)} rows (--max_samples)")
 
     print("Pre-filtering sequences with no right-hand landmarks...")
     valid_mask = []
