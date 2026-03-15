@@ -85,7 +85,8 @@ def _build_tcn_birnn_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> Loa
 
 
 def _build_embedded_rnn_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> LoadedModel:
-    hidden_size = int(state_dict["rnn.weight_ih_l0"].shape[0])
+    # weight_hh_l0 shape is [num_gates * hidden_size, hidden_size] — shape[1] gives true hidden_size
+    hidden_size = int(state_dict["rnn.weight_hh_l0"].shape[1])
     input_dim = int(state_dict["rnn.weight_ih_l0"].shape[1])
     out_key = "fc.weight" if "fc.weight" in state_dict else "classifier.weight"
     output_dim = int(state_dict[out_key].shape[0])
