@@ -187,12 +187,17 @@ def main():
     print("===================================\n")
 
     if args.n_examples > 0:
-        sorted_pairs = sorted(zip(targets, preds), key=lambda x: len(x[0]))
+        cer_fn = CharErrorRate()
+        sorted_pairs = sorted(
+            zip(targets, preds),
+            key=lambda x: float(cer_fn([x[1]], [x[0]]).item()),
+        )
         n = min(args.n_examples, len(sorted_pairs))
-        print(f"Sample predictions ({n} shortest GT sequences):")
+        print(f"Sample predictions ({n} best CER, ascending):")
         for gt, pred in sorted_pairs[:n]:
+            sample_cer = float(cer_fn([pred], [gt]).item())
             status = "✓" if gt == pred else "✗"
-            print(f"  [{status}] GT: {gt!r:30s}  PRED: {pred!r}")
+            print(f"  [{status}] CER={sample_cer:.2f}  GT: {gt!r:30s}  PRED: {pred!r}")
 
 
 if __name__ == "__main__":
