@@ -269,20 +269,22 @@ cd fingerspelling_asl
 
 # Train the TCN+BiLSTM model (best configuration)
 python -m src.train \
-  --model tcn_bilstm \
+  --model lstm \
   --train_csv data/train.csv \
-  --landmarks_dir data/train_landmarks \
+  --data_dir data/asl-fingerspelling \
   --epochs 50 \
   --batch_size 32 \
   --lr 1e-3 \
   --hidden_dim 256 \
-  --max_train_samples 50000
+  --train_size 50000 
+  --val_size 50000
+
 
 # Train the baseline RNN
 python -m src.train \
   --model rnn \
   --train_csv data/train.csv \
-  --landmarks_dir data/train_landmarks \
+  --data_dir data/asl-fingerspelling \
   --epochs 20 \
   --batch_size 16 \
   --lr 5e-4
