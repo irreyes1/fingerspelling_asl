@@ -296,9 +296,8 @@ Optionally pass `--wandb_project <project_name>` and `--wandb_tags <tag1,tag2>` 
 
 ```bash
 python -m src.evaluate \
-  --checkpoint checkpoints/<run_name>/best_model.pt \
-  --train_csv data/train.csv \
-  --landmarks_dir data/train_landmarks
+       --ckpt artifacts/models/run_best.pt \
+       --data_dir data/asl-fingerspelling
 ```
 
 ### Real-Time Webcam Inference
