@@ -427,13 +427,40 @@ pip install -r requirements.txt
 
 ### Dataset
 
-Download the Google ASL Fingerspelling dataset from Kaggle and place the files as follows:
+Two scripts in `scripts/` handle the full dataset setup:
+
+**1. Download from Kaggle**
+
+Requires the [Kaggle CLI](https://github.com/Kaggle/kaggle-api) configured with your credentials (`~/.kaggle/kaggle.json`).
+
+```bash
+bash scripts/download_asl.sh [download_dir]
+```
+
+- `download_dir` is optional — defaults to `./asl-fingerspelling`
+- Downloads all `train_landmarks/` and `supplemental_landmarks/` parquet files from the `asl-fingerspelling` competition
+- Automatically unzips any files that Kaggle returns as `.zip`
+
+**2. Fix zipped parquets (if needed)**
+
+Kaggle occasionally returns `.parquet` files that are actually ZIP archives (detectable by their magic bytes). If you encounter read errors, run:
+
+```bash
+bash scripts/fix_zipped_parquets.sh data/asl-fingerspelling/train_landmarks data/asl-fingerspelling/supplemental_landmarks
+```
+
+This inspects each `.parquet` file, extracts it in-place if it's a ZIP, and skips files that are already valid.
+
+After running the scripts, the expected layout is:
 
 ```
 fingerspelling_asl/
   data/
     train.csv
     train_landmarks/
+      <file_id>.parquet
+      ...
+    supplemental_landmarks/
       <file_id>.parquet
       ...
 ```
