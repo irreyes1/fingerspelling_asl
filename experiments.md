@@ -8,6 +8,9 @@
 | clearml-l4-full-data-100epochs-nodrop | 2026-03-14 | bilstm | 100 | 64 | 1e-4 | 512 | 0 | 0 (all) | 0 (all) | yes (p=15) | 10.6 | 0.471 | 0.985 | 100 | No dropout, full data; scheduler on CER; LR decayed to 3.125e-6 (5× reductions); CER improved vs dropout run | clearml-l4-full-data-100epochs-nodrop_202e8769 |
 | clearml-l4-weight-decay-1e4 | 2026-03-15 | bilstm | 100 | 128 | 1e-4 | 512 | 0 | 0 (all) | 0 (all) | yes (p=15) | 11.0 | 0.812 | 1.032 | 100 | L2 weight_decay=1e-4, 3 LSTM layers, batch=128; CER much worse than prev run (0.471); LR decayed to 7.8125e-7 (7× reductions); | clearml-l4-weight-decay-1e4_de9e11a2 |
 | clearml-l4-weight-decay-1e4-lrate-1e3 | 2026-03-16 | bilstm | 100 | 128 | 1e-3 | 512 | 0 | 0 (all) | 0 (all) | yes (p=15) | 5.8 | 0.402 | 0.917 | 53 | Best val CER across all runs; early stopping at epoch 53; LR decayed to 6.25e-5 (4× reductions); significant overfitting (train CER 0.117 vs val 0.402) | clearml-l4-weight-decay-1e4-lrate-1e3_8564e777 |
+| clearml-l4-golden-arch-100 | 2026-03-16 | bilstm | 100 | 64 | 1e-3 | 256 | 0 | 50000 | 50000 | yes (p=15) | 8.2 | 0.421 | 0.954 | 77 | train_size capped at 50k; early stopping at epoch 77; LR decayed to 7.8125e-6 (7× reductions); less overfitting than weight-decay's best run (train CER 0.235 vs val 0.421, gap=0.186) | clearml-l4-golden-arch-100_45f8e478 |
+| clearml-l4-best-config-dropout-03 | — | bilstm | 100 | 128 | 1e-3 | 512 | 0.3 | 0 (all) | 0 (all) | yes (p=15) | — | — | — | — | PENDING #1. dropout=0.3 on best config (hidden_dim=512, batch=128, weight_decay=1e-4); first fair test of dropout at this hyperparameter setting; expected train/val gap < 0.285 | — |
+| clearml-l4-golden-arch-full-data | — | bilstm | 100 | 64 | 1e-3 | 256 | 0 | 0 (all) | 0 (all) | yes (p=15) | — | — | — | — | PENDING #2. Full data with golden-run arch (hidden_dim=256 + proj_dim=128); tests whether reduced overfitting in golden run is architecture-driven; expected val CER < 0.402 | — |
 
 ---
 
@@ -65,4 +68,3 @@ Merged from `irreyes1/main` (author: Pau Vila). The intended change was:
 ```
 
 **Expected result:** Lower final CER compared to `weight_decay=0` baseline (exp #4), especially in later epochs where CER was flat. Typical safe range: `1e-5` to `1e-3`.
-

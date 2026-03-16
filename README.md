@@ -224,9 +224,10 @@ Training ran on a single GCP instance (`instance-fingerspelling`) in zone `us-ce
 
 | Component | Spec |
 |---|---|
-| Machine type | `g2-standard-4` (4 vCPUs, 16 GB RAM) |
+| Machine type | `g2-standard-12` (12 vCPUs, 48 GB RAM) |
 | GPU | 1× NVIDIA L4 (~23 GB VRAM) |
-| Boot disk | Debian 13, 300 GB NVMe SSD |
+| Operating System | Google, Deep Learning VM with CUDA 12.4, M129, Debian 11, Python 3.10 |
+| Boot disk | Debian 11, 250 GB NVMe SSD |
 | Provisioning | Standard (not Spot — prevents preemption during long runs) |
 
 The VM was intentionally provisioned as Standard rather than Spot, since Spot instances can be preempted by GCP at any time and cannot be converted to Standard after creation. To switch, a new Standard VM was created reusing the existing boot disk.
@@ -354,7 +355,7 @@ To measure real-world generalisation, the best checkpoint (epoch 34, BiLSTM v3) 
 
 **Results:**
 
-| Metric          | Validation (v3) | Test (held-out) |
+| Metric          | Validation (v3) | Test.           |
 |-----------------|-----------------|-----------------|
 | CER             | 0.38            | 0.52            |
 | Avg Edit Dist   | 4.95            | 14.84           |
@@ -470,9 +471,8 @@ fingerspelling_asl/
 ```bash
 cd fingerspelling_asl
 
-# Train the BiLSTM model (best configuration)
+# Train the BiLSTM model (best configuration so far)
 python -m src.train \
-  --model lstm \
   --train_csv data/train.csv \
   --data_dir data/asl-fingerspelling \
   --epochs 50 \
@@ -485,7 +485,6 @@ python -m src.train \
 
 # Train the baseline RNN
 python -m src.train \
-  --model rnn \
   --train_csv data/train.csv \
   --data_dir data/asl-fingerspelling \
   --epochs 20 \
@@ -503,7 +502,7 @@ python -m src.evaluate \
        --data_dir data/asl-fingerspelling \
        --batch_size 128 \
        --n_examples 10 \
-       --num_workers  4
+       --num_workers 4
 ```
 
 ### Real-Time Webcam Inference
