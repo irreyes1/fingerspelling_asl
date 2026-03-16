@@ -1,6 +1,7 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 from src.models.temporal_subsampling import TemporalSubsampling
 
@@ -10,6 +11,9 @@ class EmbeddedRNN(nn.Module):
         input_dim,
         hidden_dim,
         output_dim,
+        rnn_type: str = "rnn",
+        num_layers: int = 1,
+        bidirectional: bool = False,
         enable_temporal_subsampling: bool = False,
         temporal_subsampling_type: str = "conv",
         temporal_subsampling_factor: int = 2,
@@ -24,8 +28,18 @@ class EmbeddedRNN(nn.Module):
             factor=temporal_subsampling_factor,
             hidden_dim=temporal_subsampling_hidden_dim,
         )
-        self.rnn = nn.RNN(self.temporal_subsampling.output_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        rnn_cls = {"rnn": nn.RNN, "gru": nn.GRU, "lstm": nn.LSTM}[str(rnn_type).lower()]
+        rnn_dropout = 0.0 if int(num_layers) <= 1 else 0.0
+        self.rnn = rnn_cls(
+            self.temporal_subsampling.output_dim,
+            hidden_dim,
+            num_layers=int(num_layers),
+            bidirectional=bool(bidirectional),
+            batch_first=True,
+            dropout=rnn_dropout,
+        )
+        rnn_out = int(hidden_dim) * (2 if bidirectional else 1)
+        self.fc = nn.Linear(rnn_out, output_dim)
         self.log_softmax = nn.LogSoftmax(dim=2)
 
     def transform_input_lengths(self, input_lens: torch.Tensor) -> torch.Tensor:

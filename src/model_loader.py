@@ -140,7 +140,8 @@ def _build_tcn_birnn_from_state_dict(state_dict: Dict[str, torch.Tensor], ckpt_c
 
 
 def _build_embedded_rnn_from_state_dict(state_dict: Dict[str, torch.Tensor], ckpt_config: Dict[str, Any]) -> LoadedModel:
-    hidden_size = int(state_dict["rnn.weight_ih_l0"].shape[0])
+    rnn_type = _infer_rnn_type_from_state_dict(state_dict)
+    hidden_size = int(state_dict["rnn.weight_hh_l0"].shape[1])
     post_subsample_dim = int(state_dict["rnn.weight_ih_l0"].shape[1])
     subsampling_cfg = _infer_subsampling_from_ckpt(state_dict, ckpt_config)
     input_dim = post_subsample_dim
@@ -155,11 +156,24 @@ def _build_embedded_rnn_from_state_dict(state_dict: Dict[str, torch.Tensor], ckp
             subsampling_cfg["temporal_subsampling_hidden_dim"] = int(first_subsample_w.shape[0])
     out_key = "fc.weight" if "fc.weight" in state_dict else "classifier.weight"
     output_dim = int(state_dict[out_key].shape[0])
+    layer_ids = set()
+    for k in state_dict.keys():
+        m = re.match(r"^rnn\.weight_ih_l(\d+)$", k)
+        if m:
+            layer_ids.add(int(m.group(1)))
+    rnn_layers = int(ckpt_config.get("num_layers", ckpt_config.get("rnn_layers", (max(layer_ids) + 1) if layer_ids else 1)))
+    bidirectional = bool(
+        ckpt_config.get("bidirectional", "bidir" in str(ckpt_config.get("wandb_tags", "")).lower())
+        or any(k.startswith("rnn.weight_ih_l0_reverse") for k in state_dict.keys())
+    )
 
     model = EmbeddedRNN(
         input_dim=input_dim,
         hidden_dim=hidden_size,
         output_dim=output_dim,
+        rnn_type=rnn_type,
+        num_layers=rnn_layers,
+        bidirectional=bidirectional,
         enable_temporal_subsampling=subsampling_cfg["enable_temporal_subsampling"],
         temporal_subsampling_type=subsampling_cfg["temporal_subsampling_type"],
         temporal_subsampling_factor=subsampling_cfg["temporal_subsampling_factor"],

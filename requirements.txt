@@ -1,16 +1,11 @@
 
 torch
-torchvision
-torchaudio
 numpy
 pandas
 pyarrow
 matplotlib
-tqdm
 torchmetrics
-tensorboard
 opencv-python
 mediapipe
-streamlit
-plotly
-wandb
+fastapi
+uvicorn

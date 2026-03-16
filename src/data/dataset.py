@@ -1,5 +1,6 @@
 import os
-from typing import Dict, List, Optional
+from collections import Counter
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,12 +33,19 @@ def _get_right_hand_cols(parquet_path: str) -> List[str]:
 
 def read_right_hand_sequence(parquet_path: str, sequence_id: int) -> np.ndarray:
     cols = _get_right_hand_cols(parquet_path)
-    table = pq.read_table(
-        parquet_path,
-        filters=[("sequence_id", "=", sequence_id)],
-        columns=cols,
-    )
-    X = table.to_pandas().values.astype(np.float32)  # (T, D)
+    try:
+        table = pq.read_table(
+            parquet_path,
+            filters=[("sequence_id", "=", sequence_id)],
+            columns=cols,
+        )
+        X = table.to_pandas(ignore_metadata=True).values.astype(np.float32)  # (T, D)
+    except OSError:
+        # Some copied parquet files fail when Arrow applies row-group filters.
+        # Fallback: read sequence_id plus right_hand columns and filter in memory.
+        table = pq.read_table(parquet_path, columns=["sequence_id", *cols])
+        pdf = table.to_pandas(ignore_metadata=True)
+        X = pdf.loc[pdf["sequence_id"] == sequence_id, cols].values.astype(np.float32)
     return X
 
 
@@ -124,7 +132,7 @@ class ASLRightHandDataset(Dataset):
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx: int):
+    def _load_item(self, idx: int) -> Tuple[Optional[Tuple[torch.Tensor, torch.Tensor, int, int]], Optional[str]]:
         row = self.df.iloc[idx]
         file_id = int(row["file_id"])
         sequence_id = int(row["sequence_id"])
@@ -134,8 +142,7 @@ class ASLRightHandDataset(Dataset):
         else:
             parquet_path = os.path.join(self.landmarks_dir, f"{file_id}.parquet")
         if not os.path.exists(parquet_path):
-            # If parquet missing, mark sample invalid
-            return None
+            return None, "missing_parquet"
 
         X_raw = read_right_hand_sequence(parquet_path, sequence_id)  # (T, D)
         input_len = count_valid_frames(X_raw)
@@ -152,12 +159,30 @@ class ASLRightHandDataset(Dataset):
         Y = torch.tensor(row["encoded"], dtype=torch.long)
         target_len = int(len(Y))
 
+        if target_len == 0:
+            return None, "empty_target"
         # CTC requirement: input_len >= target_len (very strict when input_len small)
-        if input_len < target_len or target_len == 0:
-            return None
+        if input_len < target_len:
+            return None, "input_shorter_than_target"
 
         X = torch.tensor(X, dtype=torch.float32)
-        return X, Y, int(min(input_len, self.max_frames)), target_len
+        return (X, Y, int(min(input_len, self.max_frames)), target_len), None
+
+    def __getitem__(self, idx: int):
+        sample, _ = self._load_item(idx)
+        return sample
+
+    def summarize_validity(self, max_items: Optional[int] = None) -> Dict[str, int]:
+        n_items = len(self.df) if max_items is None else min(int(max_items), len(self.df))
+        counts: Counter[str] = Counter()
+        for idx in range(n_items):
+            sample, reason = self._load_item(idx)
+            if sample is None:
+                counts[str(reason or "invalid")] += 1
+            else:
+                counts["valid"] += 1
+        counts["scanned"] = n_items
+        return dict(counts)
 
 
 def collate_fn(batch):

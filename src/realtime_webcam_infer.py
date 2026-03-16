@@ -27,6 +27,15 @@ MP_HAND_CONNECTIONS = [
 ]
 
 
+def build_compact_letter_vocab() -> Tuple[Dict[str, int], Dict[int, str], int]:
+    alphabet = [" "] + [chr(ord("a") + i) for i in range(26)]
+    blank_id = CTC_BLANK_ID
+    char_to_idx = {c: i + 1 for i, c in enumerate(alphabet)}
+    idx2char = {i: c for c, i in char_to_idx.items()}
+    idx2char[blank_id] = ""
+    return char_to_idx, idx2char, blank_id
+
+
 def load_vocab(vocab_json_path: str) -> Tuple[Dict[str, int], Dict[int, str], int]:
     with open(vocab_json_path, "r", encoding="utf-8") as f:
         base_char_to_idx = {k: int(v) for k, v in json.load(f).items()}
@@ -85,37 +94,98 @@ def find_right_hand(result) -> Tuple[Optional[List], Optional[List]]:
     return hand, handed
 
 
-def hand_to_vec63(hand_landmarks) -> np.ndarray:
-    pts = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks], dtype=np.float32)  # (21,3)
-    wrist = pts[0:1, :]
-    pts = pts - wrist
-
-    # Scale by median distance to stabilize person-camera distance.
-    d = np.linalg.norm(pts[:, :2], axis=1)
-    ref = float(np.median(d[d > 1e-6])) if np.any(d > 1e-6) else 1.0
-    pts = pts / max(ref, 1e-6)
-
-    return np.nan_to_num(pts.reshape(-1).astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)  # 63
+def hand_to_dataset_layout63(hand_landmarks) -> np.ndarray:
+    # Match parquet layout: x0..x20, y0..y20, z0..z20.
+    pts = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks], dtype=np.float32)  # (21, 3)
+    xs = pts[:, 0]
+    ys = pts[:, 1]
+    zs = pts[:, 2]
+    return np.concatenate([xs, ys, zs], axis=0).astype(np.float32)
 
 
-def adapt_feature_dim(vec63: np.ndarray, prev_vec63: np.ndarray, expected_dim: int) -> np.ndarray:
-    if expected_dim == 63:
-        return vec63
-    if expected_dim == 126:
-        delta = vec63 - prev_vec63
-        return np.nan_to_num(np.concatenate([vec63, delta], axis=0).astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+def normalize_landmarks_remote(X: np.ndarray) -> np.ndarray:
+    xs = X[:, :21].copy()
+    ys = X[:, 21:42].copy()
+    zs = X[:, 42:63].copy()
 
-    # Fallback: pad/truncate to checkpoint input dim.
-    out = np.zeros((expected_dim,), dtype=np.float32)
-    m = min(expected_dim, vec63.shape[0])
-    out[:m] = vec63[:m]
-    return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    xs -= xs[:, 0:1]
+    ys -= ys[:, 0:1]
+    zs -= zs[:, 0:1]
+
+    max_val = max(float(np.abs(xs).max()), float(np.abs(ys).max()))
+    if max_val > 1e-6:
+        xs /= max_val
+        ys /= max_val
+        zs /= max_val
+    return np.concatenate([xs, ys, zs], axis=1).astype(np.float32)
+
+
+def compute_deltas_remote(X: np.ndarray) -> np.ndarray:
+    deltas = np.zeros_like(X, dtype=np.float32)
+    if X.shape[0] > 1:
+        deltas[1:] = X[1:] - X[:-1]
+    return deltas
+
+
+def build_model_input_from_history(
+    history_raw63: List[np.ndarray],
+    expected_dim: int,
+    max_frames: int,
+    normalize_landmarks: bool,
+    use_delta_features: bool,
+) -> tuple[np.ndarray, int]:
+    valid_t = min(len(history_raw63), max_frames)
+    if valid_t <= 0:
+        return np.zeros((max_frames, expected_dim), dtype=np.float32), 0
+
+    seq = np.stack(history_raw63[-valid_t:], axis=0).astype(np.float32)
+    seq = np.nan_to_num(seq, nan=0.0, posinf=0.0, neginf=0.0)
+    if normalize_landmarks:
+        seq = normalize_landmarks_remote(seq)
+    if expected_dim == 126 or use_delta_features:
+        seq = np.concatenate([seq, compute_deltas_remote(seq)], axis=1).astype(np.float32)
+    elif expected_dim != 63:
+        out = np.zeros((valid_t, expected_dim), dtype=np.float32)
+        m = min(expected_dim, seq.shape[1])
+        out[:, :m] = seq[:, :m]
+        seq = out
+
+    x_np = np.zeros((max_frames, expected_dim), dtype=np.float32)
+    x_np[:valid_t] = seq[:valid_t]
+    return x_np, valid_t
 
 
 def overlay_text(frame, lines: List[str], x: int = 16, y: int = 28):
+    text_color = (139, 61, 23)  # dark blue-ish in OpenCV BGR
+    outline_color = (235, 235, 235)
     for i, line in enumerate(lines):
         yy = y + i * 28
-        cv2.putText(frame, line, (x, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (40, 255, 40), 2, cv2.LINE_AA)
+        cv2.putText(frame, line, (x, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.72, outline_color, 4, cv2.LINE_AA)
+        cv2.putText(frame, line, (x, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.72, text_color, 2, cv2.LINE_AA)
+
+
+def open_camera(camera_index: int):
+    backends = [
+        ("CAP_ANY", cv2.CAP_ANY),
+        ("CAP_MSMF", cv2.CAP_MSMF),
+        ("CAP_DSHOW", cv2.CAP_DSHOW),
+    ]
+    debug = []
+    for name, backend in backends:
+        cap = cv2.VideoCapture(int(camera_index), backend)
+        opened = bool(cap.isOpened())
+        read_ok = False
+        if opened:
+            for _ in range(5):
+                read_ok, _ = cap.read()
+                if read_ok:
+                    break
+                time.sleep(0.08)
+        debug.append({"backend": name, "opened": opened, "read_ok": bool(read_ok)})
+        if opened and read_ok:
+            return cap, debug
+        cap.release()
+    return cv2.VideoCapture(), debug
 
 
 def main():
@@ -153,23 +223,33 @@ def main():
     if not vocab_path.exists():
         raise FileNotFoundError(f"Missing vocab json: {vocab_path}")
 
-    _, idx2char, blank_id = load_vocab(str(vocab_path))
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     loaded = load_model_from_checkpoint(args.ckpt, device=device)
     model = loaded.model
     expected_dim = int(loaded.input_dim)
+    expected_output_dim = int(loaded.output_dim)
     ckpt_cfg = loaded.config or {}
-    cfg_letters_only = bool(ckpt_cfg.get("letters_only", False))
-    cfg_lowercase = bool(ckpt_cfg.get("lowercase_phrases", False))
+    use_delta_features = bool(ckpt_cfg.get("use_delta_features", expected_dim > 63))
+    normalize_landmarks = not bool(ckpt_cfg.get("disable_landmark_centering", False))
+    inferred_letters_only = expected_output_dim == 28
+    cfg_letters_only = bool(ckpt_cfg.get("letters_only", inferred_letters_only))
+    cfg_lowercase = bool(ckpt_cfg.get("lowercase_phrases", inferred_letters_only))
     cfg_max_frames = int(ckpt_cfg.get("max_frames", args.max_frames))
+    if inferred_letters_only:
+        _, idx2char, blank_id = build_compact_letter_vocab()
+    else:
+        _, idx2char, blank_id = load_vocab(str(vocab_path))
     if int(args.max_frames) != int(cfg_max_frames):
         print(f"Warning: --max_frames={args.max_frames} differs from checkpoint max_frames={cfg_max_frames}")
     if "decode_blank_skip_threshold" in ckpt_cfg and float(args.blank_skip_threshold) == 1.0:
         args.blank_skip_threshold = float(ckpt_cfg["decode_blank_skip_threshold"])
 
     print(f"Model loaded. input_dim={expected_dim} output_dim={loaded.output_dim} device={device}")
-    print(f"Checkpoint text filters: lowercase={cfg_lowercase} letters_only={cfg_letters_only}")
+    print(
+        f"Checkpoint text filters: lowercase={cfg_lowercase} "
+        f"letters_only={cfg_letters_only} normalize={normalize_landmarks} "
+        f"deltas={use_delta_features} scale=max_abs_xy_remote"
+    )
     print(f"Blank gating threshold: {args.blank_skip_threshold:.3f}")
 
     base_options = python.BaseOptions(model_asset_path=str(hand_model_path))
@@ -180,7 +260,7 @@ def main():
     )
     detector = vision.HandLandmarker.create_from_options(options)
 
-    cap = cv2.VideoCapture(args.camera_index, cv2.CAP_DSHOW)
+    cap, camera_debug = open_camera(args.camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
     if not cap.isOpened():
@@ -188,9 +268,9 @@ def main():
 
     print("Webcam inferencia activa. ESC para salir.")
 
-    # Store only frames with detected right hand; we pad at inference time to match training layout.
+    # Store only frames with detected right hand; preprocess the whole visible
+    # sequence right before inference to stay closer to training.
     buffer = deque(maxlen=args.max_frames)
-    prev_vec63 = np.zeros((63,), dtype=np.float32)
     frame_id = 0
     fps = 0.0
     t_prev = time.perf_counter()
@@ -239,10 +319,8 @@ def main():
             hand_label = f"{h.category_name}:{h.score:.2f}"
 
         if right_hand is not None:
-            vec63 = hand_to_vec63(right_hand)
-            feat = adapt_feature_dim(vec63, prev_vec63, expected_dim)
-            prev_vec63 = vec63
-            buffer.append(feat)
+            raw63 = hand_to_dataset_layout63(right_hand)
+            buffer.append(raw63)
 
             # Draw hand
             h, w = frame.shape[:2]
@@ -265,16 +343,21 @@ def main():
 
         # Inference loop
         if len(buffer) >= args.min_frames and (frame_id % args.infer_every == 0):
-            hist = list(buffer)
-            valid_t = min(len(hist), args.max_frames)
-            x_np = np.zeros((args.max_frames, expected_dim), dtype=np.float32)
-            if valid_t > 0:
-                x_np[:valid_t] = np.stack(hist[-valid_t:], axis=0).astype(np.float32)
-            x_np = np.nan_to_num(x_np, nan=0.0, posinf=0.0, neginf=0.0)
+            x_np, valid_t = build_model_input_from_history(
+                history_raw63=list(buffer),
+                expected_dim=expected_dim,
+                max_frames=args.max_frames,
+                normalize_landmarks=normalize_landmarks,
+                use_delta_features=use_delta_features,
+            )
             x = torch.from_numpy(x_np).unsqueeze(0).to(device)  # (1,T,D)
+            input_lens = torch.tensor([valid_t], dtype=torch.long, device=device)
 
             with torch.no_grad():
-                log_probs = model(x)  # (T,1,C)
+                try:
+                    log_probs = model(x, input_lens)
+                except TypeError:
+                    log_probs = model(x)  # (T,1,C)
                 valid_log_probs = log_probs[:valid_t, :, :] if valid_t > 0 else log_probs[:1, :, :]
                 probs = torch.exp(valid_log_probs[:, 0, :])  # (T_valid,C)
                 mean_probs = probs.mean(dim=0)  # (C,)
@@ -384,6 +467,18 @@ def main():
             if candidate_valid and candidate_letter:
                 live_text += candidate_letter
                 status_text = f"Capturada: '{candidate_letter}' (conf={candidate_effective_conf:.2f})"
+            elif candidate_letter:
+                live_text += candidate_letter
+                status_text = (
+                    f"Captura forzada: '{candidate_letter}' "
+                    f"(conf={candidate_effective_conf:.2f}, blank={blank_prob:.2f})"
+                )
+            elif raw_ctc_text:
+                live_text += raw_ctc_text[-1]
+                status_text = (
+                    f"Captura forzada desde CTC: '{raw_ctc_text[-1]}' "
+                    f"(raw={raw_ctc_text!r})"
+                )
             else:
                 status_text = "Sin captura valida: ajusta gesto/iluminacion o espera mejor confianza"
             status_until = time.perf_counter() + 1.6
