@@ -24,8 +24,7 @@ except ImportError:
 
 from src.data.dataset import ASLRightHandDataset, collate_fn
 from src.data.vocab import build_ctc_vocab, encode_phrase
-from src.models.embedded_rnn import EmbeddedRNN
-from src.models.tcn_bilstm import TCNBiRNN
+from src.models.tcn_bilstm import BiLSTM
 from src.utils.metrics import ctc_greedy_decode, evaluate_metrics
 
 
@@ -378,7 +377,7 @@ def main():
     input_dim = 126
     output_dim = max(int_to_letter.keys()) + 1
 
-    model = EmbeddedRNN(
+    model = BiLSTM(
         input_dim, args.hidden_dim, output_dim, dropout=args.dropout
     ).to(device)
 
