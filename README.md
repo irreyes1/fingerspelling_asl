@@ -30,6 +30,8 @@
     - [Experiment 2 — Architecture Comparison](#experiment-2--architecture-comparison)
     - [Experiment 3 — BiLSTM Hyperparameter Tuning](#experiment-3--bilstm-hyperparameter-tuning)
     - [Test Phase — Best Model Evaluation (BiLSTM v3)](#test-phase--best-model-evaluation-bilstm-v3)
+      - [Dataset split](#dataset-split)
+      - [Setup](#setup)
   - [5. Next Steps](#5-next-steps)
   - [6. Final Thoughts](#6-final-thoughts)
   - [7. How to Run](#7-how-to-run)
@@ -130,10 +132,29 @@ We selected the **Google ASL Fingerspelling Competition dataset** from Kaggle, w
 
 **Dataset details**
 
-Each frame in a sequence captures the 3D coordinates of 21 right-hand landmarks (x, y, z), giving 63 raw features per frame. Metadata is provided via `train.csv`, linking each `sequence_id` to its Parquet landmark file and target phrase. The train/val split is done **by participant ID** (80/20) to prevent data leakage — i.e., the same person never appears in both training and validation sets, ensuring the model generalizes to unseen signers.
+Landmark data was extracted from raw video using the **MediaPipe holistic model**. Each Parquet file contains ~1,000 sequences with 1,629 spatial columns covering x, y, z coordinates for 543 landmarks across four types (`face`, `left_hand`, `pose`, `right_hand`). Not all frames have detectable hands — some sequences contain frames where MediaPipe failed to detect the hand entirely.
+
+**We use only the 21 right-hand landmarks.** This gives 63 raw features per frame (x, y, z per landmark). Velocity features (frame-to-frame deltas) are concatenated to the position features, giving **126 input features per frame** (63 position + 63 velocity). Note: while MediaPipe's depth prediction is unreliable, z is retained as an input feature and left to the model to down-weight.
+
+Metadata is provided via `train.csv` and `supplemental_metadata.csv`, each with the following columns:
+
+| Column | Description |
+|---|---|
+| `path` | Path to the landmark Parquet file |
+| `file_id` | Unique identifier for the data file |
+| `participant_id` | Unique identifier for the signer |
+| `sequence_id` | Unique identifier for the landmark sequence |
+| `phrase` | Target text label for the sequence |
+
+The train/val split is done **by participant ID** (80/20) to prevent data leakage — i.e., the same person never appears in both training and validation sets, ensuring the model generalises to unseen signers.
+
+| Split | Phrase content | Sequences |
+|---|---|---|
+| Train / Validation | Randomly generated addresses, phone numbers, and URLs | 54,496 train · 6,209 val |
+| Supplemental | Natural fingerspelled sentences | ~4,413 usable after filtering |
 
 - **Vocabulary:** 27 characters (a–z + space), plus one CTC blank token → 28 output classes.
-- **Data split:** Train: 54,496 sequences · Val: 6,209 · Test: 6,503.
+- **Label mapping:** Defined in `character_to_prediction_index.json`.
 
 The original dataset contains a significant number of phrases with digits, punctuation, URLs, and addresses (e.g., phone numbers, street addresses). These were deliberately excluded from training, reducing the working vocabulary to lowercase letters and spaces only. This was a pragmatic scoping decision: a smaller, cleaner output space makes the sequence alignment problem more tractable, allows earlier validation of the core architecture, and avoids the model spending capacity on rare characters. Expanding the vocabulary to cover the full character set remains an open next step.
 
@@ -348,9 +369,18 @@ The model handles short, common phrases well but still struggles with longer or 
 
 To measure real-world generalisation, the best checkpoint (epoch 34, BiLSTM v3) was evaluated on the **supplemental held-out test set** — a separate portion of the Google ASL dataset not seen during training or validation.
 
-**Setup:**
+#### Dataset split
+
+The supplemental test set is a distinct split of the [Google ASL Fingerspelling Competition dataset](https://www.kaggle.com/competitions/asl-fingerspelling/data) — consisting mostly of natural fingerspelled sentences.
+
+**Format:** Landmark data extracted from raw video using the MediaPipe holistic model. Each Parquet file contains ~1,000 sequences, with 1,629 spatial columns covering x, y, z coordinates for 543 landmarks across four types (`face`, `left_hand`, `pose`, `right_hand`). Not all frames have detectable hands — some sequences contain frames where MediaPipe failed to detect the hand entirely.
+
+**Our usage:** We use only the 21 right-hand landmarks (x, y → 42 features per frame; z discarded as noted by MediaPipe's own documentation on depth prediction reliability). After filtering sequences with no right-hand landmarks, the supplemental set yields **4,413 usable sequences** across 53 Parquet files.
+
+#### Setup
+
 - Checkpoint: `best_ever.pt` (epoch 34, BiLSTM v3)
-- Dataset: supplemental landmarks (53 parquet files → 4,413 usable sequences after filtering frames with no right-hand landmarks)
+- Dataset: supplemental landmarks (53 parquet files → 4,413 usable sequences after filtering)
 - Evaluation script: `src/evaluate.py` running on the GCP VM
 
 **Results:**
