@@ -49,7 +49,7 @@
 
 Fingerspelling is a fundamental component of American Sign Language (ASL), used to spell out proper names, technical terms, and words that lack a dedicated sign. Despite its importance, automatic fingerspelling recognition remains an open and challenging problem. 
 
-![ASL Fingerspelling example](docs/images/fingerspelling-asl.png)
+![ASL Fingerspelling alphabet](docs/images/fingerspelling-asl.png)
 
 **Unlike static hand gesture classification — which maps a single image to a letter — fingerspelling recognition requires understanding temporal sequences of hand poses that together form words and phrases. The model must learn not just the shape of each letter, but also the transitions between them, which vary naturally across signers, signing speeds, and recording conditions.**
 
@@ -214,6 +214,8 @@ A standard encoder-only Transformer using multi-head self-attention. Self-attent
 **Conformer**
 A hybrid of convolution and self-attention, originally proposed for speech recognition (ASR). It interleaves local convolutional blocks with global self-attention blocks to capture both fine-grained local patterns and long-range context. Like the Transformer, it tends to require large datasets to show its full potential.
 
+![Neural Architectures](docs/images/archs.png)
+
 ### 3.5 Training Setup
 
 All models were trained with the following common setup:
@@ -227,6 +229,8 @@ All models were trained with the following common setup:
 
 ### 3.6 Infrastructure
 
+![Infrastructure setup](docs/images/infra-setup.png)
+
 The project was developed iteratively across multiple compute environments, driven by resource availability and the need to scale experiments:
 
 - **Language & framework:** Python with PyTorch.
@@ -235,7 +239,12 @@ The project was developed iteratively across multiple compute environments, driv
 - **Experiment tracking:** Weights & Biases (W&B) was used to monitor and compare training runs, tracking metrics such as CER, training loss, and average edit distance across all experiments.
 
 
+
+
 ### 3.7 MLOps
+
+
+![MLOps setup](docs/images/mlops.png)
 
 Once training moved to Google Cloud, we set up a lightweight MLOps stack to better manage experiment queuing, execution, and artifact storage across the team.
 
