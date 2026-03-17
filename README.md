@@ -49,7 +49,7 @@
 
 Fingerspelling is a fundamental component of American Sign Language (ASL), used to spell out proper names, technical terms, and words that lack a dedicated sign. Despite its importance, automatic fingerspelling recognition remains an open and challenging problem. 
 
-[imagen de fingerspelling]
+![ASL Fingerspelling example](docs/images/fingerspelling-asl.png)
 
 **Unlike static hand gesture classification — which maps a single image to a letter — fingerspelling recognition requires understanding temporal sequences of hand poses that together form words and phrases. The model must learn not just the shape of each letter, but also the transitions between them, which vary naturally across signers, signing speeds, and recording conditions.**
 
