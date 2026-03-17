@@ -39,15 +39,15 @@ scaler.update()
 
 **Expected result:** This would halve experiment execution time (from ~2.6h to ~1.3h), allowing faster iteration across runs.
 
-**Actual result:** Training 75 epochs took ~4hs
+**Actual result:** Training 75 epochs took 7.8h — speedup was less than expected.
 
 ---
 
 ### Scheduler now monitors val CER (commit `8d60549`, 2026-03-14)
 
-_Experiments #4 and onwards will run with this change._
+_Implemented from experiment #4 (`clearml-l4-full-data-100epochs-nodrop`) onwards._
 
-Merged from `irreyes1/main` (author: Pau Vila). The intended change was:
+Merged from `irreyes1/main` (author: Pau Vila). The change was:
 
 - **`scheduler.step(metrics_val["cer"])`** replaces `scheduler.step(metrics_val["loss"])` — `ReduceLROnPlateau` now reduces LR when val CER stops improving instead of val loss. This is a better signal since CER is the actual evaluation metric.
 
@@ -70,11 +70,13 @@ Merged from `irreyes1/main` (author: Pau Vila). The intended change was:
 
 **Expected result:** Lower final CER compared to `weight_decay=0` baseline (exp #4), especially in later epochs where CER was flat. Typical safe range: `1e-5` to `1e-3`.
 
+**Actual result:** val CER 0.812 — significantly worse than the no-decay baseline (0.471). The poor result was likely caused by lr=1e-4 being too low for this config (LR decayed to 7.8125e-7, effectively zero), not weight decay itself.
+
 ---
 
 ### Reintroduce dropout with best config (experiment `clearml-l4-best-config-dropout-03`)
 
-_RUNNING #1_
+_COMPLETED_
 
 The best config (lr=1e-3, batch=128, hidden=512, weight_decay=1e-4) has never been tested with dropout. The earlier dropout run (`clearml-l4-full-data-45epochs`, dropout=0.3) used very different hyperparameters, so no fair comparison exists. `clearml-l4-weight-decay-1e4-lrate-1e3` shows significant overfitting (train CER 0.117 vs val 0.402, gap=0.285) — dropout is the most direct tool to close it.
 
@@ -86,8 +88,10 @@ The best config (lr=1e-3, batch=128, hidden=512, weight_decay=1e-4) has never be
 
 ### Full data with golden-run architecture (experiment `clearml-l4-golden-arch-full-data`)
 
-_SCHEDULED_
+_COMPLETED_
 
 `clearml-l4-golden-arch-100` (hidden_dim=256) showed better generalisation (gap=0.186) than the best run (gap=0.285), but train_size was capped at 50k. The reduced overfitting likely comes from the smaller architecture, not the data cap — so adding full data should bring val CER down without widening the gap.
 
 **Expected result:** val CER below 0.421 (`clearml-l4-golden-arch-100`) and potentially below 0.402 (best run), with the train/val gap remaining contained.
+
+**Actual result:** val CER 0.511 — worse than the capped-data run (0.421); blank_ratio=0.924 suggesting near CTC collapse; model stopped at epoch 30 with near-zero train/val gap (both ~0.5). The reduced overfitting in `clearml-l4-golden-arch-100` was likely due to the data cap, not the architecture alone.
