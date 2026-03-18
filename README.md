@@ -444,16 +444,16 @@ The table below summarises the most recent runs in this tuning phase:
 | clearml-l4-best-config-dropout-03 | 512 | 128 | 1e-3 | 0.3 | 0.394 | 0.903 | 0.219 | Dropout on best config; new best CER at the time |
 | clearml-l4-golden-arch-full-data | 256 | 64 | 1e-3 | 0 | 0.511 | 0.998 | ~0.020 | CTC collapse on full data without dropout |
 | clearml-l4-best-config-batch-64 | 512 | 64 | 1e-3 | 0.3 | 0.386 | 0.902 | 0.284 | Batch 128→64 improved CER but widened gap |
-| clearml-l4-golden-arch-hidden-256 | **256** | 64 | 1e-3 | **0.3** | **0.383** | 0.907 | **0.165** | Best val CER and best train/val gap across all runs |
-| clearml-l4-best-config-batch-32 | 512 | 32 | 1e-3 | 0.3 | — | — | — | Running |
+| clearml-l4-golden-arch-hidden-256 | 256 | 64 | 1e-3 | 0.3 | 0.383 | 0.907 | 0.165 | hidden=256 + dropout=0.3; best gap across all runs |
+| clearml-l4-best-config-batch-32 | **256** | **32** | 1e-3 | **0.3** | **0.372** | 0.887 | 0.180 | New best val CER; batch 64→32 on hidden=256 config |
 
 **Key findings:**
 
-- **hidden_dim=256 + dropout=0.3** (`clearml-l4-golden-arch-hidden-256`) delivered both the best val CER (0.3736) and the smallest train/val gap (0.165) — a smaller, well-regularised model outperformed larger ones.
+- **hidden_dim=256 + dropout=0.3 + batch=32** (`clearml-l4-best-config-batch-32`) achieved the best val CER (0.372) — further reducing batch size on the golden architecture continued to improve generalisation.
 - **CTC collapse** occurred when scaling to full data without dropout on the hidden=256 architecture, confirming that dropout is critical at this data scale.
-- **Batch size reduction** (128→64) consistently improved val CER but widened overfitting — pairing it with dropout was necessary to keep the gap in check.
+- **Batch size reduction** (128→64→32) consistently improved val CER; pairing with dropout kept the train/val gap from widening.
 
-We iteratively tuned key hyperparameters (LR, batch size, hidden dim, dropout) to minimise character error rate and control overfitting, achieving a best val CER of **0.3736** with a train/val gap of **0.165**.
+We iteratively tuned key hyperparameters (LR, batch size, hidden dim, dropout) to minimise character error rate and control overfitting, achieving a best val CER of **0.372** with a train/val gap of **0.180**.
 
 For the complete experiment log — including all runs, full hyperparameter details, LR decay history, and per-experiment notes — see [experiments.md](experiments.md).
 
