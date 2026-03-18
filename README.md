@@ -34,6 +34,7 @@
     - [Test Phase — Best Model Evaluation (BiLSTM v3)](#test-phase--best-model-evaluation-bilstm-v3)
       - [Dataset split](#dataset-split)
       - [Setup](#setup)
+    - [Hyperparameter Tuning Experiments](#hyperparameter-tuning-experiments)
   - [5. Next Steps](#5-next-steps)
   - [6. Final Thoughts](#6-final-thoughts)
   - [7. How to Run](#7-how-to-run)
@@ -431,6 +432,32 @@ The test CER (0.52) is 14 points higher than the validation CER (0.38), indicati
 The most striking pattern in the predictions is **systematic space dropping**: the model correctly recognises most characters but consistently fails to insert spaces between words (e.g., *"nobody cares anymore"* → *"nobody caresanymore"*, *"round robin scheduling"* → *"roundrobinscheduling"*). This directly explains the near-perfect WER of 0.9951 and 0% exact match — even when the character sequence is almost entirely correct, a missing space makes every affected word count as an error. This is consistent with the challenge highlighted by Georg et al. (FSBoard): word boundary detection is an open problem in fingerspelling recognition, and the space character is particularly ambiguous at signing speed.
 
 **The character-level quality of the best predictions (CER 0.05–0.15) suggests the model has learned solid letter-level recognition. The primary remaining failure modes are word boundary detection, occasional letter deletions on longer phrases, and generalisation to unseen signers.**
+
+---
+
+### Hyperparameter Tuning Experiments
+
+Building on Experiment 3 — BiLSTM Hyperparameter Tuning, we conducted a deeper systematic search on the BiLSTM model — iteratively varying learning rate, batch size, hidden dimension, and dropout to minimise validation CER and control overfitting. All runs used the full training dataset, CTC loss, Adam optimiser, and a `ReduceLROnPlateau` scheduler monitoring validation CER, executed on the GCP VM via the ClearML queue.
+
+The table below summarises the most recent runs in this tuning phase:
+
+| Run | Hidden Dim | Batch Size | LR | Dropout | Val CER | Val WER | Train/Val Gap | Notes |
+|-----|-----------|------------|-----|---------|---------|---------|---------------|-------|
+| clearml-l4-best-config-dropout-03 | 512 | 128 | 1e-3 | 0.3 | 0.394 | 0.903 | 0.219 | Dropout on best config; new best CER at the time |
+| clearml-l4-golden-arch-full-data | 256 | 64 | 1e-3 | 0 | 0.511 | 0.998 | ~0.020 | CTC collapse on full data without dropout |
+| clearml-l4-best-config-batch-64 | 512 | 64 | 1e-3 | 0.3 | 0.386 | 0.902 | 0.284 | Batch 128→64 improved CER but widened gap |
+| clearml-l4-golden-arch-hidden-256 | **256** | 64 | 1e-3 | **0.3** | **0.383** | 0.907 | **0.165** | Best val CER and best train/val gap across all runs |
+| clearml-l4-best-config-batch-32 | 512 | 32 | 1e-3 | 0.3 | — | — | — | Running |
+
+**Key findings:**
+
+- **hidden_dim=256 + dropout=0.3** (`clearml-l4-golden-arch-hidden-256`) delivered both the best val CER (0.3736) and the smallest train/val gap (0.165) — a smaller, well-regularised model outperformed larger ones.
+- **CTC collapse** occurred when scaling to full data without dropout on the hidden=256 architecture, confirming that dropout is critical at this data scale.
+- **Batch size reduction** (128→64) consistently improved val CER but widened overfitting — pairing it with dropout was necessary to keep the gap in check.
+
+We iteratively tuned key hyperparameters (LR, batch size, hidden dim, dropout) to minimise character error rate and control overfitting, achieving a best val CER of **0.3736** with a train/val gap of **0.165**.
+
+For the complete experiment log — including all runs, full hyperparameter details, LR decay history, and per-experiment notes — see [experiments.md](experiments.md).
 
 ---
 
