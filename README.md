@@ -342,6 +342,10 @@ All four architectures (RNN, BiLSTM, Transformer, Conformer) were trained under 
 | Conformer       | 3.1        | 0.90    | Early stopping, emits many blanks  |
 | Transformer     | 3.2        | 1.00    | Early stopping, fails to converge  |
 
+- *Arch Compare - LOSS PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/5nm6uaj7
+- *ARCH COMPARE - CER PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/j11d5iky
+- *GT/PRED Examples BiLSTM*: https://wandb.ai/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/fingerspelling_asl/reports/Weave-empty-26-03-16-14-50-09---VmlldzoxNjIyMTYyNw?accessToken=dyujfpnjs0d0ej4t19cay0ktozzd8kopozdzpqixfvjxenfzvpb50hkrt4qslzie
+
 **Conclusions:**
 BiLSTM is the clear winner in this constrained setting. The combination of dilated convolutions for local pattern extraction and bidirectional LSTM for sequence-level context provides the best balance of capacity and data efficiency. The RNN remains a functional baseline. Both the Transformer and Conformer trigger early stopping — they fail to reduce CER meaningfully within 20 epochs on the small subset. This is expected: attention-based models are known to require more data and longer training to stabilize. Their underperformance here is not a reflection of their true capability, but rather of the resource constraints of this study. BiLSTM was selected as the architecture to optimize in Experiment 3.
 
@@ -375,6 +379,9 @@ Key changes from v1 to v3:
 | Train Loss          | 1.57  | 1.22  | **0.71**  |
 | Val CER             | 0.63  | 0.52  | **0.38**  |
 | Avg Edit Distance   | 9.87  | 8.44  | **4.95**  |
+
+- *BiLST Tuning - LOSS PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/2to5nc1b
+- *BiLST Tuning - CER PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/lu4t8so7
 
 **Conclusions:**
 The most impactful single change was **scaling the training data from 3k to 50k sequences**. This alone (v2) reduced CER by 0.11 points. Further increasing model capacity and tuning learning rate and batch size (v3) brought CER down to 0.38 — a 40% relative improvement over the initial v1 configuration. The average edit distance dropped from ~10 characters off per prediction to ~5, which starts to approach practically useful quality for shorter phrases. The learning curves show that the model had not converged by epoch 20 in earlier runs, confirming that longer training was warranted.
@@ -423,6 +430,7 @@ The supplemental test set is a distinct split of the [Google ASL Fingerspelling 
 | 0.13 | user friendly interface         | userfriendlinterface           |
 | 0.14 | a quarter of a century          | aquauter ofa century           |
 
+
 **Analysis:**
 
 The test CER (0.52) is 14 points higher than the validation CER (0.38), indicating a distribution gap between the training/validation data and the supplemental test set — likely due to different signers, phrase lengths, or signing styles not seen during training.
@@ -430,6 +438,10 @@ The test CER (0.52) is 14 points higher than the validation CER (0.38), indicati
 The most striking pattern in the predictions is **systematic space dropping**: the model correctly recognises most characters but consistently fails to insert spaces between words (e.g., *"nobody cares anymore"* → *"nobody caresanymore"*, *"round robin scheduling"* → *"roundrobinscheduling"*). This directly explains the near-perfect WER of 0.9951 and 0% exact match — even when the character sequence is almost entirely correct, a missing space makes every affected word count as an error. This is consistent with the challenge highlighted by Georg et al. (FSBoard): word boundary detection is an open problem in fingerspelling recognition, and the space character is particularly ambiguous at signing speed.
 
 **The character-level quality of the best predictions (CER 0.05–0.15) suggests the model has learned solid letter-level recognition. The primary remaining failure modes are word boundary detection, occasional letter deletions on longer phrases, and generalisation to unseen signers.**
+
+
+**Webcam Inference demo**
+https://drive.google.com/file/d/1-5X5YWhAUKKpfzAQ220Aq5QBbFxnOhPm/view?resourcekey
 
 ---
 
