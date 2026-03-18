@@ -1,5 +1,4 @@
 ﻿# Sign Language Fingerspelling Recognition
-<img width="560" height="529" alt="image" src="https://github.com/user-attachments/assets/509f4434-991c-47ef-adde-2490096854bb" />
 
 **Team:** 
 - Iñaki Rodriguez 
