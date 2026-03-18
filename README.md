@@ -23,6 +23,8 @@
     - [3.3 Preprocessing Pipeline](#33-preprocessing-pipeline)
     - [3.4 Neural Architectures](#34-neural-architectures)
     - [3.5 Training Setup](#35-training-setup)
+      - [3.5.1 Primary metric](#351-primary-metric)
+      - [3.5.2 Secondary metric](#352-secondary-metric)
     - [3.6 Infrastructure](#36-infrastructure)
     - [3.7 MLOps](#37-mlops)
   - [4. Experiments](#4-experiments)
@@ -181,6 +183,9 @@ Before writing any model code, the first step was to understand the structure of
 
 CTC (Connectionist Temporal Classification) is the standard solution for sequence alignment problems where the correspondence between input and output is unknown. It takes a long input sequence (frames) and a short target sequence (characters), and learns the alignment automatically — without requiring frame-level labels. This is the same mechanism used in speech recognition and lip reading, and it fits the fingerspelling problem directly.
 
+![CTC Loss](docs/images/ctc.jpg)
+
+
 The key insight is that using CTC is not an arbitrary choice: it is a direct consequence of how the data is structured. Any approach that requires explicit frame-to-letter alignment would need manual annotation that does not exist in the dataset.
 
 ### 3.3 Preprocessing Pipeline
@@ -195,7 +200,7 @@ Raw landmark data requires several cleaning and enrichment steps before it can b
    - *Temporal resampling:* Each sequence is randomly resampled to 0.8×–1.2× its original speed, simulating faster and slower signers.
 6. **Sequence padding/truncation:** All sequences are padded or truncated to a fixed length of **160 frames** to enable batched training.
 
-[imagen de processing pipeline]
+![Preprocessing pipeline](docs/images/preprocessing_pipeline.png)
 
 
 ### 3.4 Neural Architectures
@@ -224,12 +229,18 @@ All models were trained with the following common setup:
 - **Decoding:** Greedy CTC decoding at inference time — the most likely character per frame is selected, then consecutive duplicates and blank tokens are collapsed.
 - **Optimizer:** Adam with an initial learning rate of 5e-4 (adjusted per experiment).
 - **Regularization:** Gradient clipping and early stopping based on validation CER.
-- **Primary metric:** Character Error Rate (CER) = (Insertions + Deletions + Substitutions) / Total characters. Lower is better; a CER of 0 means perfect prediction.
-- **Secondary metric:** Word Error Rate (WER) = proportion of words where at least one character is wrong. WER is a stricter measure than CER — a single character error makes an entire word incorrect — and gives a better sense of end-to-end usability. Both CER and WER were tracked via W&B across all runs.
+
+#### 3.5.1 Primary metric
+
+- **Character Error Rate**  (CER) = (Insertions + Deletions + Substitutions) / Total characters. Lower is better; a CER of 0 means perfect prediction.
+
+![Character Error Rate ](docs/images/cer.png)
+
+#### 3.5.2 Secondary metric
+
+- **Word Error Rate:**  (WER) = proportion of words where at least one character is wrong. WER is a stricter measure than CER — a single character error makes an entire word incorrect — and gives a better sense of end-to-end usability. Both CER and WER were tracked via W&B across all runs.
 
 ### 3.6 Infrastructure
-
-![Infrastructure setup](docs/images/infra-setup.png)
 
 The project was developed iteratively across multiple compute environments, driven by resource availability and the need to scale experiments:
 
@@ -238,13 +249,9 @@ The project was developed iteratively across multiple compute environments, driv
 - **Training progression:** We started on Kaggle notebooks for initial prototyping. As experiments grew in complexity, we migrated to Lightning AI for better runtime management. Once Lightning compute credits were exhausted, we moved training to Google Cloud GPU instances for higher throughput and larger dataset runs.
 - **Experiment tracking:** Weights & Biases (W&B) was used to monitor and compare training runs, tracking metrics such as CER, training loss, and average edit distance across all experiments.
 
-
-
+![Infrastructure setup](docs/images/infra-setup.png)
 
 ### 3.7 MLOps
-
-
-![MLOps setup](docs/images/mlops.png)
 
 Once training moved to Google Cloud, we set up a lightweight MLOps stack to better manage experiment queuing, execution, and artifact storage across the team.
 
@@ -271,6 +278,7 @@ Architecture:
 - **Agent:** Runs as a systemd daemon on the VM, picking tasks from the `default` queue and executing them sequentially on the GPU.
 - **SDK:** Integrated into `src/train.py` via `Task.init()` — automatically captures all argparse parameters, metrics, stdout logs, and GPU stats per run.
 
+![MLOps setup](docs/images/mlops.png)
 
 **Auto-Shutdown Watchdog**
 
@@ -286,6 +294,8 @@ Model checkpoints were automatically synced to a Google Cloud Storage bucket (`g
 - `{run_name}_{task_id}_latest.txt` — metadata for latest checkpoint
 
 The `task_id` suffix (first 8 chars of the ClearML task ID) ensures checkpoints from different runs of the same experiment never overwrite each other and can always be traced back to their ClearML task entry.
+
+
 
 ---
 
