@@ -455,7 +455,7 @@ The table below summarises the most recent runs in this tuning phase:
 
 We iteratively tuned key hyperparameters (LR, batch size, hidden dim, dropout) to minimise character error rate and control overfitting, achieving a best val CER of **0.372** with a train/val gap of **0.180**.
 
-For the complete experiment log — including all runs, full hyperparameter details, LR decay history, and per-experiment notes — see [experiments.md](experiments.md).
+For the complete experiment log — including all runs, full hyperparameter details, LR decay history, and per-experiment notes — see [experiments.md](experiments.md) and [W&B Report](https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/so8y4yyw)
 
 ---
 
@@ -618,4 +618,5 @@ python -m src.quick_infer \
   - https://www.kaggle.com/code/sscalzadonnaupc/notebook136616d653-v12-landmarks *(W&B integration + wrist-centered landmarks)*
 - *LightningAI Studio:* https://lightning.ai//inference-optimization-project/studios/notebook13/code?turnOn=true
 - *W&B Workspace:* https://wandb.ai/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/fingerspelling_asl
+- *W&B Report* https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/so8y4yyw
 - *ClearML:* https://app.clear.ml/projects/f7947bf18c6d48039162f95680b94cab/tasks/9a635b0548e941dbab846fd54d52826d/hyper-params/hyper-param/Args

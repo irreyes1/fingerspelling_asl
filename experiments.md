@@ -17,7 +17,13 @@
 
 ---
 
+
+
 ## Notes / Suggestions
+
+### References
+
+- *W&B Report* https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/so8y4yyw
 
 ---
 
@@ -99,3 +105,4 @@ _COMPLETED_
 **Actual result:** val CER 0.511 — worse than the capped-data run (0.421); blank_ratio=0.924 suggesting near CTC collapse; model stopped at epoch 30 with near-zero train/val gap (both ~0.5). The reduced overfitting in `clearml-l4-golden-arch-100` was likely due to the data cap, not the architecture alone.
 
 ---
+
