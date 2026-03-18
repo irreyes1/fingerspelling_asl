@@ -24,7 +24,7 @@
     - [3.4 Neural Architectures](#34-neural-architectures)
     - [3.5 Training Setup](#35-training-setup)
       - [3.5.1 Primary metric](#351-primary-metric)
-      - [3.5.1 Secondary metric](#351-secondary-metric)
+      - [3.5.2 Secondary metric](#352-secondary-metric)
     - [3.6 Infrastructure](#36-infrastructure)
     - [3.7 MLOps](#37-mlops)
   - [4. Experiments](#4-experiments)
@@ -183,6 +183,7 @@ Before writing any model code, the first step was to understand the structure of
 
 CTC (Connectionist Temporal Classification) is the standard solution for sequence alignment problems where the correspondence between input and output is unknown. It takes a long input sequence (frames) and a short target sequence (characters), and learns the alignment automatically — without requiring frame-level labels. This is the same mechanism used in speech recognition and lip reading, and it fits the fingerspelling problem directly.
 
+![CTC Loss](docs/images/ctc.jpg)
 
 
 The key insight is that using CTC is not an arbitrary choice: it is a direct consequence of how the data is structured. Any approach that requires explicit frame-to-letter alignment would need manual annotation that does not exist in the dataset.
@@ -235,7 +236,7 @@ All models were trained with the following common setup:
 
 ![Character Error Rate ](docs/images/cer.png)
 
-#### 3.5.1 Secondary metric
+#### 3.5.2 Secondary metric
 
 - **Word Error Rate:**  (WER) = proportion of words where at least one character is wrong. WER is a stricter measure than CER — a single character error makes an entire word incorrect — and gives a better sense of end-to-end usability. Both CER and WER were tracked via W&B across all runs.
 
