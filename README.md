@@ -1,4 +1,5 @@
 ﻿# Sign Language Fingerspelling Recognition
+<img width="560" height="529" alt="image" src="https://github.com/user-attachments/assets/509f4434-991c-47ef-adde-2490096854bb" />
 
 **Team:** 
 - Iñaki Rodriguez 
@@ -23,6 +24,8 @@
     - [3.3 Preprocessing Pipeline](#33-preprocessing-pipeline)
     - [3.4 Neural Architectures](#34-neural-architectures)
     - [3.5 Training Setup](#35-training-setup)
+      - [3.5.1 Primary metric](#351-primary-metric)
+      - [3.5.2 Secondary metric](#352-secondary-metric)
     - [3.6 Infrastructure](#36-infrastructure)
     - [3.7 MLOps](#37-mlops)
   - [4. Experiments](#4-experiments)
@@ -32,6 +35,7 @@
     - [Test Phase — Best Model Evaluation (BiLSTM v3)](#test-phase--best-model-evaluation-bilstm-v3)
       - [Dataset split](#dataset-split)
       - [Setup](#setup)
+    - [Hyperparameter Tuning Experiments](#hyperparameter-tuning-experiments)
   - [5. Next Steps](#5-next-steps)
   - [6. Final Thoughts](#6-final-thoughts)
   - [7. How to Run](#7-how-to-run)
@@ -134,6 +138,8 @@ We selected the **Google ASL Fingerspelling Competition dataset** from Kaggle, w
 
 Landmark data was extracted from raw video using the **MediaPipe holistic model**. Each Parquet file contains ~1,000 sequences with 1,629 spatial columns covering x, y, z coordinates for 543 landmarks across four types (`face`, `left_hand`, `pose`, `right_hand`). Not all frames have detectable hands — some sequences contain frames where MediaPipe failed to detect the hand entirely.
 
+![MediaPipe Hand landmark](docs/images/hand_landmarks.png)
+
 **We use only the 21 right-hand landmarks.** This gives 63 raw features per frame (x, y, z per landmark). Velocity features (frame-to-frame deltas) are concatenated to the position features, giving **126 input features per frame** (63 position + 63 velocity). Note: while MediaPipe's depth prediction is unreliable, z is retained as an input feature and left to the model to down-weight.
 
 Metadata is provided via `train.csv` and `supplemental_metadata.csv`, each with the following columns:
@@ -158,11 +164,9 @@ The train/val split is done **by participant ID** (80/20) to prevent data leakag
 
 The original dataset contains a significant number of phrases with digits, punctuation, URLs, and addresses (e.g., phone numbers, street addresses). These were deliberately excluded from training, reducing the working vocabulary to lowercase letters and spaces only. This was a pragmatic scoping decision: a smaller, cleaner output space makes the sequence alignment problem more tractable, allows earlier validation of the core architecture, and avoids the model spending capacity on rare characters. Expanding the vocabulary to cover the full character set remains an open next step.
 
-[imagen]
-
 ### 3.2 Problem Formulation
 
-Before writing any model code, the first step was to understand the structure of the data and commit to a technical approach. This analysis — documented in our [Kaggle notebook series](https://www.kaggle.com/code/sscalzadonnaupc/notebook136616d653-v12-landmarks) — shaped every design decision that followed.
+Before writing any model code, the first step was to understand the structure of the data and commit to a technical approach. This analysis — documented in our [Kaggle notebook series](#references) — shaped every design decision that followed.
 
 **Key observations from the dataset:**
 - There are no frame-level annotations. Each sample is labeled at the level of a full phrase, not individual letters.
@@ -181,6 +185,9 @@ Before writing any model code, the first step was to understand the structure of
 
 CTC (Connectionist Temporal Classification) is the standard solution for sequence alignment problems where the correspondence between input and output is unknown. It takes a long input sequence (frames) and a short target sequence (characters), and learns the alignment automatically — without requiring frame-level labels. This is the same mechanism used in speech recognition and lip reading, and it fits the fingerspelling problem directly.
 
+![CTC Loss](docs/images/ctc.jpg)
+
+
 The key insight is that using CTC is not an arbitrary choice: it is a direct consequence of how the data is structured. Any approach that requires explicit frame-to-letter alignment would need manual annotation that does not exist in the dataset.
 
 ### 3.3 Preprocessing Pipeline
@@ -195,7 +202,7 @@ Raw landmark data requires several cleaning and enrichment steps before it can b
    - *Temporal resampling:* Each sequence is randomly resampled to 0.8×–1.2× its original speed, simulating faster and slower signers.
 6. **Sequence padding/truncation:** All sequences are padded or truncated to a fixed length of **160 frames** to enable batched training.
 
-[imagen de processing pipeline]
+![Preprocessing pipeline](docs/images/preprocessing_pipeline.png)
 
 
 ### 3.4 Neural Architectures
@@ -224,12 +231,18 @@ All models were trained with the following common setup:
 - **Decoding:** Greedy CTC decoding at inference time — the most likely character per frame is selected, then consecutive duplicates and blank tokens are collapsed.
 - **Optimizer:** Adam with an initial learning rate of 5e-4 (adjusted per experiment).
 - **Regularization:** Gradient clipping and early stopping based on validation CER.
-- **Primary metric:** Character Error Rate (CER) = (Insertions + Deletions + Substitutions) / Total characters. Lower is better; a CER of 0 means perfect prediction.
-- **Secondary metric:** Word Error Rate (WER) = proportion of words where at least one character is wrong. WER is a stricter measure than CER — a single character error makes an entire word incorrect — and gives a better sense of end-to-end usability. Both CER and WER were tracked via W&B across all runs.
+
+#### 3.5.1 Primary metric
+
+- **Character Error Rate**  (CER) = (Insertions + Deletions + Substitutions) / Total characters. Lower is better; a CER of 0 means perfect prediction.
+
+![Character Error Rate ](docs/images/cer.png)
+
+#### 3.5.2 Secondary metric
+
+- **Word Error Rate:**  (WER) = proportion of words where at least one character is wrong. WER is a stricter measure than CER — a single character error makes an entire word incorrect — and gives a better sense of end-to-end usability. Both CER and WER were tracked via W&B across all runs.
 
 ### 3.6 Infrastructure
-
-![Infrastructure setup](docs/images/infra-setup.png)
 
 The project was developed iteratively across multiple compute environments, driven by resource availability and the need to scale experiments:
 
@@ -238,13 +251,9 @@ The project was developed iteratively across multiple compute environments, driv
 - **Training progression:** We started on Kaggle notebooks for initial prototyping. As experiments grew in complexity, we migrated to Lightning AI for better runtime management. Once Lightning compute credits were exhausted, we moved training to Google Cloud GPU instances for higher throughput and larger dataset runs.
 - **Experiment tracking:** Weights & Biases (W&B) was used to monitor and compare training runs, tracking metrics such as CER, training loss, and average edit distance across all experiments.
 
-
-
+![Infrastructure setup](docs/images/infra-setup.png)
 
 ### 3.7 MLOps
-
-
-![MLOps setup](docs/images/mlops.png)
 
 Once training moved to Google Cloud, we set up a lightweight MLOps stack to better manage experiment queuing, execution, and artifact storage across the team.
 
@@ -271,6 +280,7 @@ Architecture:
 - **Agent:** Runs as a systemd daemon on the VM, picking tasks from the `default` queue and executing them sequentially on the GPU.
 - **SDK:** Integrated into `src/train.py` via `Task.init()` — automatically captures all argparse parameters, metrics, stdout logs, and GPU stats per run.
 
+![MLOps setup](docs/images/clear-mlops.png)
 
 **Auto-Shutdown Watchdog**
 
@@ -424,6 +434,32 @@ The most striking pattern in the predictions is **systematic space dropping**: t
 
 ---
 
+### Hyperparameter Tuning Experiments
+
+Building on Experiment 3 — BiLSTM Hyperparameter Tuning, we conducted a deeper systematic search on the BiLSTM model — iteratively varying learning rate, batch size, hidden dimension, and dropout to minimise validation CER and control overfitting. All runs used the full training dataset, CTC loss, Adam optimiser, and a `ReduceLROnPlateau` scheduler monitoring validation CER, executed on the GCP VM via the ClearML queue.
+
+The table below summarises the most recent runs in this tuning phase:
+
+| Run | Hidden Dim | Batch Size | LR | Dropout | Val CER | Val WER | Train/Val Gap | Notes |
+|-----|-----------|------------|-----|---------|---------|---------|---------------|-------|
+| clearml-l4-best-config-dropout-03 | 512 | 128 | 1e-3 | 0.3 | 0.394 | 0.903 | 0.219 | Dropout on best config; new best CER at the time |
+| clearml-l4-golden-arch-full-data | 256 | 64 | 1e-3 | 0 | 0.511 | 0.998 | ~0.020 | CTC collapse on full data without dropout |
+| clearml-l4-best-config-batch-64 | 512 | 64 | 1e-3 | 0.3 | 0.386 | 0.902 | 0.284 | Batch 128→64 improved CER but widened gap |
+| clearml-l4-golden-arch-hidden-256 | 256 | 64 | 1e-3 | 0.3 | 0.383 | 0.907 | 0.165 | hidden=256 + dropout=0.3; best gap across all runs |
+| clearml-l4-best-config-batch-32 | **256** | **32** | 1e-3 | **0.3** | **0.372** | 0.887 | 0.180 | New best val CER; batch 64→32 on hidden=256 config |
+
+**Key findings:**
+
+- **hidden_dim=256 + dropout=0.3 + batch=32** (`clearml-l4-best-config-batch-32`) achieved the best val CER (0.372) — further reducing batch size on the golden architecture continued to improve generalisation.
+- **CTC collapse** occurred when scaling to full data without dropout on the hidden=256 architecture, confirming that dropout is critical at this data scale.
+- **Batch size reduction** (128→64→32) consistently improved val CER; pairing with dropout kept the train/val gap from widening.
+
+We iteratively tuned key hyperparameters (LR, batch size, hidden dim, dropout) to minimise character error rate and control overfitting, achieving a best val CER of **0.372** with a train/val gap of **0.180**.
+
+For the complete experiment log — including all runs, full hyperparameter details, LR decay history, and per-experiment notes — see [experiments.md](experiments.md) and [W&B Report](https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/so8y4yyw)
+
+---
+
 ## 5. Next Steps
 
 The current system is a working proof of concept. Several directions offer clear paths toward production-quality performance:
@@ -570,10 +606,9 @@ python -m src.quick_infer \
 - Georg et al. (2024). *FSBoard.* https://arxiv.org/pdf/2407.15806
 - Shi et al. (2023). *YouTube-ASL.* https://arxiv.org/abs/2306.15162
 
-**Datasets**
-- *Google ASL Fingerspelling Dataset:* https://www.kaggle.com/competitions/asl-fingerspelling/data
-- *ChicagoFSWild / ChicagoFSWild+:* https://home.ttic.edu/~klivescu/ChicagoFSWild.htm
-- *FSBoard:* https://www.kaggle.com/datasets/googleai/fsboard
+**Frameworks**
+- *PyTorch*: https://docs.pytorch.org/docs/stable/index.html
+- *MediaPipe Hand landmark detection*: https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker?hl=en
 
 **Project resources**
 - *Kaggle Notebooks (baseline development, chronological):*
@@ -584,4 +619,5 @@ python -m src.quick_infer \
   - https://www.kaggle.com/code/sscalzadonnaupc/notebook136616d653-v12-landmarks *(W&B integration + wrist-centered landmarks)*
 - *LightningAI Studio:* https://lightning.ai//inference-optimization-project/studios/notebook13/code?turnOn=true
 - *W&B Workspace:* https://wandb.ai/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/fingerspelling_asl
+- *W&B Report* https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/so8y4yyw
 - *ClearML:* https://app.clear.ml/projects/f7947bf18c6d48039162f95680b94cab/tasks/9a635b0548e941dbab846fd54d52826d/hyper-params/hyper-param/Args
