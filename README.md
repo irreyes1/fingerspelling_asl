@@ -279,7 +279,7 @@ Architecture:
 - **Agent:** Runs as a systemd daemon on the VM, picking tasks from the `default` queue and executing them sequentially on the GPU.
 - **SDK:** Integrated into `src/train.py` via `Task.init()` — automatically captures all argparse parameters, metrics, stdout logs, and GPU stats per run.
 
-![MLOps setup](docs/images/mlops.png)
+![MLOps setup](docs/images/clear-mlops.png)
 
 **Auto-Shutdown Watchdog**
 
@@ -296,7 +296,7 @@ Model checkpoints were automatically synced to a Google Cloud Storage bucket (`g
 
 The `task_id` suffix (first 8 chars of the ClearML task ID) ensures checkpoints from different runs of the same experiment never overwrite each other and can always be traced back to their ClearML task entry.
 
-
+![MLOps syncs](docs/images/mlops.png)
 
 ---
 
