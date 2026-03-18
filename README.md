@@ -134,6 +134,8 @@ We selected the **Google ASL Fingerspelling Competition dataset** from Kaggle, w
 
 Landmark data was extracted from raw video using the **MediaPipe holistic model**. Each Parquet file contains ~1,000 sequences with 1,629 spatial columns covering x, y, z coordinates for 543 landmarks across four types (`face`, `left_hand`, `pose`, `right_hand`). Not all frames have detectable hands — some sequences contain frames where MediaPipe failed to detect the hand entirely.
 
+![MediaPipe Hand landmark](docs/images/hand_landmarks.png)
+
 **We use only the 21 right-hand landmarks.** This gives 63 raw features per frame (x, y, z per landmark). Velocity features (frame-to-frame deltas) are concatenated to the position features, giving **126 input features per frame** (63 position + 63 velocity). Note: while MediaPipe's depth prediction is unreliable, z is retained as an input feature and left to the model to down-weight.
 
 Metadata is provided via `train.csv` and `supplemental_metadata.csv`, each with the following columns:
@@ -158,11 +160,9 @@ The train/val split is done **by participant ID** (80/20) to prevent data leakag
 
 The original dataset contains a significant number of phrases with digits, punctuation, URLs, and addresses (e.g., phone numbers, street addresses). These were deliberately excluded from training, reducing the working vocabulary to lowercase letters and spaces only. This was a pragmatic scoping decision: a smaller, cleaner output space makes the sequence alignment problem more tractable, allows earlier validation of the core architecture, and avoids the model spending capacity on rare characters. Expanding the vocabulary to cover the full character set remains an open next step.
 
-[imagen]
-
 ### 3.2 Problem Formulation
 
-Before writing any model code, the first step was to understand the structure of the data and commit to a technical approach. This analysis — documented in our [Kaggle notebook series](https://www.kaggle.com/code/sscalzadonnaupc/notebook136616d653-v12-landmarks) — shaped every design decision that followed.
+Before writing any model code, the first step was to understand the structure of the data and commit to a technical approach. This analysis — documented in our [Kaggle notebook series](#references) — shaped every design decision that followed.
 
 **Key observations from the dataset:**
 - There are no frame-level annotations. Each sample is labeled at the level of a full phrase, not individual letters.
@@ -570,10 +570,9 @@ python -m src.quick_infer \
 - Georg et al. (2024). *FSBoard.* https://arxiv.org/pdf/2407.15806
 - Shi et al. (2023). *YouTube-ASL.* https://arxiv.org/abs/2306.15162
 
-**Datasets**
-- *Google ASL Fingerspelling Dataset:* https://www.kaggle.com/competitions/asl-fingerspelling/data
-- *ChicagoFSWild / ChicagoFSWild+:* https://home.ttic.edu/~klivescu/ChicagoFSWild.htm
-- *FSBoard:* https://www.kaggle.com/datasets/googleai/fsboard
+**Frameworks**
+- *PyTorch*: https://docs.pytorch.org/docs/stable/index.html
+- *MediaPipe Hand landmark detection*: https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker?hl=en
 
 **Project resources**
 - *Kaggle Notebooks (baseline development, chronological):*
