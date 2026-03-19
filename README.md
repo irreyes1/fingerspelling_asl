@@ -1,5 +1,4 @@
 ﻿# Sign Language Fingerspelling Recognition
-<img width="560" height="529" alt="image" src="https://github.com/user-attachments/assets/509f4434-991c-47ef-adde-2490096854bb" />
 
 **Team:** 
 - Iñaki Rodriguez 
@@ -343,6 +342,10 @@ All four architectures (RNN, BiLSTM, Transformer, Conformer) were trained under 
 | Conformer       | 3.1        | 0.90    | Early stopping, emits many blanks  |
 | Transformer     | 3.2        | 1.00    | Early stopping, fails to converge  |
 
+- *Arch Compare - LOSS PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/5nm6uaj7
+- *ARCH COMPARE - CER PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/j11d5iky
+- *GT/PRED Examples BiLSTM*: https://wandb.ai/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/fingerspelling_asl/reports/Weave-empty-26-03-16-14-50-09---VmlldzoxNjIyMTYyNw?accessToken=dyujfpnjs0d0ej4t19cay0ktozzd8kopozdzpqixfvjxenfzvpb50hkrt4qslzie
+
 **Conclusions:**
 BiLSTM is the clear winner in this constrained setting. The combination of dilated convolutions for local pattern extraction and bidirectional LSTM for sequence-level context provides the best balance of capacity and data efficiency. The RNN remains a functional baseline. Both the Transformer and Conformer trigger early stopping — they fail to reduce CER meaningfully within 20 epochs on the small subset. This is expected: attention-based models are known to require more data and longer training to stabilize. Their underperformance here is not a reflection of their true capability, but rather of the resource constraints of this study. BiLSTM was selected as the architecture to optimize in Experiment 3.
 
@@ -377,6 +380,9 @@ Key changes from v1 to v3:
 | Val CER             | 0.63  | 0.52  | **0.38**  |
 | Avg Edit Distance   | 9.87  | 8.44  | **4.95**  |
 
+- *BiLST Tuning - LOSS PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/2to5nc1b
+- *BiLST Tuning - CER PLOTS*: https://api.wandb.ai/links/inaki-rodriguez-reyes-upc-universidad-peruana-de-ciencia/lu4t8so7
+
 **Conclusions:**
 The most impactful single change was **scaling the training data from 3k to 50k sequences**. This alone (v2) reduced CER by 0.11 points. Further increasing model capacity and tuning learning rate and batch size (v3) brought CER down to 0.38 — a 40% relative improvement over the initial v1 configuration. The average edit distance dropped from ~10 characters off per prediction to ~5, which starts to approach practically useful quality for shorter phrases. The learning curves show that the model had not converged by epoch 20 in earlier runs, confirming that longer training was warranted.
 
@@ -386,17 +392,52 @@ The model handles short, common phrases well but still struggles with longer or 
 
 ### Test Phase — Best Model Evaluation (BiLSTM v3)
 
-To measure real-world generalisation, the best checkpoint (epoch 34, BiLSTM v3) was evaluated on the **supplemental held-out test set** — a separate portion of the Google ASL dataset not seen during training or validation.
+To measure real-world generalisation, the best checkpoint (epoch 34, BiLSTM v3) was evaluated on the **[test set](https://www.kaggle.com/datasets/sohier/529505295052950/)** — a separate portion of the Google ASL dataset not seen during training or validation.
 
-#### Dataset split
+**Note on supplemental dataset:** initially the supplemental set was thought as being a test set as being separated from the main train set, in particular it has no overlap on the `participant_id`. However it contrains a different kind of examples as stated in [Google ASL Fingerspelling Competition dataset](https://www.kaggle.com/competitions/asl-fingerspelling/data), thus making it unsuitable for actual test.:
+>The train and test datasets contain randomly generated addresses, phone numbers, and urls derived from components of real addresses/phone numbers/urls. [...] The supplemental dataset consists of fingerspelled sentences.
 
-The supplemental test set is a distinct split of the [Google ASL Fingerspelling Competition dataset](https://www.kaggle.com/competitions/asl-fingerspelling/data) — consisting mostly of natural fingerspelled sentences.
+#### Data preparation
+
+Same data preparation as for [training data](#33-preprocessing-pipeline).
 
 **Format:** Landmark data extracted from raw video using the MediaPipe holistic model. Each Parquet file contains ~1,000 sequences, with 1,629 spatial columns covering x, y, z coordinates for 543 landmarks across four types (`face`, `left_hand`, `pose`, `right_hand`). Not all frames have detectable hands — some sequences contain frames where MediaPipe failed to detect the hand entirely.
 
-**Our usage:** We use only the 21 right-hand landmarks (x, y → 42 features per frame; z discarded as noted by MediaPipe's own documentation on depth prediction reliability). After filtering sequences with no right-hand landmarks, the supplemental set yields **4,413 usable sequences** across 53 Parquet files.
+**Our usage:** We use only the 21 right-hand landmarks (x, y → 42 features per frame; z discarded as noted by MediaPipe's own documentation on depth prediction reliability). After filtering sequences with no right-hand landmarks, the test set yields **4,597 usable sequences** across 24 Parquet files.
 
-#### Setup
+#### Setup - test set
+
+- Checkpoint: `best_ever.pt` (epoch 34, BiLSTM v3)
+- Dataset: supplemental landmarks (24 parquet files → 4,597 usable sequences after filtering)
+- Evaluation script: `src/evaluate.py` running on the GCP VM
+
+**Results:**
+
+| Metric          | Validation (v3) | Test.           |
+|-----------------|-----------------|-----------------|
+| CER             | 0.38            | 0.42            |
+| Avg Edit Dist   | 4.95            | 5.94            |
+
+**Best predictions by CER:**
+
+| CER  | Ground Truth     | Prediction      |
+|------|------------------|-----------------|
+| 0.00 | mobile al        | mobile al       |
+| 0.00 | ingrid richard   | ingrid richard  |
+| 0.00 | dante mueller    | dante mueller   |
+| 0.00 | gresham oregon   | gresham oregon  |
+| 0.00 | koreaunivchoir   | koreaunivchoir  |
+| 0.00 | artistes         | artistes        |
+| 0.00 | davie florida    | davie florida   |
+| 0.00 | roland hampton   | roland hampton  |
+| 0.00 | courtney martin  | courtney martin |
+| 0.00 | boulder colorado | boulde          |
+
+**Analysis:**
+The test CER (0.42) is 4 points higher than the validation CER (0.38), which is moderate but may indicate a beginning of overfitting of the hyperparameters for the validation set.
+
+#### Setup - evaluation on supplemental set
+Note: this model was trained using only `train.csv`, disjoint from the supplemental dataset.
 
 - Checkpoint: `best_ever.pt` (epoch 34, BiLSTM v3)
 - Dataset: supplemental landmarks (53 parquet files → 4,413 usable sequences after filtering)
@@ -424,6 +465,7 @@ The supplemental test set is a distinct split of the [Google ASL Fingerspelling 
 | 0.13 | user friendly interface         | userfriendlinterface           |
 | 0.14 | a quarter of a century          | aquauter ofa century           |
 
+
 **Analysis:**
 
 The test CER (0.52) is 14 points higher than the validation CER (0.38), indicating a distribution gap between the training/validation data and the supplemental test set — likely due to different signers, phrase lengths, or signing styles not seen during training.
@@ -431,6 +473,10 @@ The test CER (0.52) is 14 points higher than the validation CER (0.38), indicati
 The most striking pattern in the predictions is **systematic space dropping**: the model correctly recognises most characters but consistently fails to insert spaces between words (e.g., *"nobody cares anymore"* → *"nobody caresanymore"*, *"round robin scheduling"* → *"roundrobinscheduling"*). This directly explains the near-perfect WER of 0.9951 and 0% exact match — even when the character sequence is almost entirely correct, a missing space makes every affected word count as an error. This is consistent with the challenge highlighted by Georg et al. (FSBoard): word boundary detection is an open problem in fingerspelling recognition, and the space character is particularly ambiguous at signing speed.
 
 **The character-level quality of the best predictions (CER 0.05–0.15) suggests the model has learned solid letter-level recognition. The primary remaining failure modes are word boundary detection, occasional letter deletions on longer phrases, and generalisation to unseen signers.**
+
+
+**Webcam Inference demo**
+https://drive.google.com/file/d/1-5X5YWhAUKKpfzAQ220Aq5QBbFxnOhPm/view?resourcekey
 
 ---
 
@@ -514,7 +560,7 @@ bash scripts/download_asl.sh [download_dir]
 ```
 
 - `download_dir` is optional — defaults to `./asl-fingerspelling`
-- Downloads all `train_landmarks/` and `supplemental_landmarks/` parquet files from the `asl-fingerspelling` competition
+- Downloads all `train_landmarks/` and `supplemental_landmarks/` parquet files from the [asl-fingerspelling](https://www.kaggle.com/competitions/asl-fingerspelling/data) competition, as well as the `test_landmarks/` from the [test dataset](https://www.kaggle.com/datasets/sohier/529505295052950/).
 - Automatically unzips any files that Kaggle returns as `.zip`
 
 **2. Fix zipped parquets (if needed)**
@@ -522,7 +568,7 @@ bash scripts/download_asl.sh [download_dir]
 Kaggle occasionally returns `.parquet` files that are actually ZIP archives (detectable by their magic bytes). If you encounter read errors, run:
 
 ```bash
-bash scripts/fix_zipped_parquets.sh data/asl-fingerspelling/train_landmarks data/asl-fingerspelling/supplemental_landmarks
+bash scripts/fix_zipped_parquets.sh data/asl-fingerspelling/train_landmarks data/asl-fingerspelling/supplemental_landmarks data/asl-fingerspelling/test_landmarks
 ```
 
 This inspects each `.parquet` file, extracts it in-place if it's a ZIP, and skips files that are already valid.
@@ -537,6 +583,9 @@ fingerspelling_asl/
       <file_id>.parquet
       ...
     supplemental_landmarks/
+      <file_id>.parquet
+      ...
+    test_landmarks/
       <file_id>.parquet
       ...
 ```

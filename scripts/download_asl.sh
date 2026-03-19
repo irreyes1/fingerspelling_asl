@@ -3,12 +3,14 @@
 # Usage: bash download_asl.sh [download_dir]
 
 COMPETITION="asl-fingerspelling"
+TEST_DATASET="sohier/529505295052950"
 DOWNLOAD_DIR="${1:-./asl-fingerspelling}"
 
 mkdir -p "$DOWNLOAD_DIR/supplemental_landmarks"
 mkdir -p "$DOWNLOAD_DIR/train_landmarks"
+mkdir -p "$DOWNLOAD_DIR/test_landmarks"
 
-FILES=(
+FILES_COMPETITION=(
     # Supplemental landmarks
     "supplemental_landmarks/371169664.parquet"
     "supplemental_landmarks/369584223.parquet"
@@ -134,16 +136,46 @@ FILES=(
     "train_landmarks/169560558.parquet"
 )
 
-TOTAL=${#FILES[@]}
-COUNT=0
-FAILED=0
+FILES_TEST=(
+    "test_landmarks/111123288.parquet"
+    "test_landmarks/1350482956.parquet"
+    "test_landmarks/1620362322.parquet"
+    "test_landmarks/265499232.parquet"
+    "test_landmarks/714499365.parquet"
+    "test_landmarks/1262950633.parquet"
+    "test_landmarks/1363588998.parquet"
+    "test_landmarks/1972425739.parquet"
+    "test_landmarks/426444153.parquet"
+    "test_landmarks/728455412.parquet"
+    "test_landmarks/1291412689.parquet"
+    "test_landmarks/1364634807.parquet"
+    "test_landmarks/2078023931.parquet"
+    "test_landmarks/455775941.parquet"
+    "test_landmarks/788570001.parquet"
+    "test_landmarks/1293700879.parquet"
+    "test_landmarks/1502077106.parquet"
+    "test_landmarks/2092171454.parquet"
+    "test_landmarks/530315993.parquet"
+    "test_landmarks/994619209.parquet"
+    "test_landmarks/1313321259.parquet"
+    "test_landmarks/1608371337.parquet"
+    "test_landmarks/230007240.parquet"
+    "test_landmarks/639657337.parquet"
+)
+
+TOTAL_COMPETITION=${#FILES_COMPETITION[@]}
+TOTAL_TEST=${#FILES_TEST[@]}
+TOTAL_ALL=$((TOTAL_COMPETITION + TOTAL_TEST))
+echo "Competition files: $TOTAL_COMPETITION"
+echo "Test files: $TOTAL_TEST"
+echo "Total files (all sets): $TOTAL_ALL"
 
 echo "Downloading $TOTAL files to $DOWNLOAD_DIR..."
 echo "============================================="
 
-for FILE in "${FILES[@]}"; do
+for FILE in "${FILES_COMPETITION[@]}"; do
     COUNT=$((COUNT + 1))
-    echo "[$COUNT/$TOTAL] Downloading $FILE..."
+    echo "[$COUNT/$TOTAL_ALL] Downloading $FILE..."
 
     kaggle competitions download -c "$COMPETITION" -f "$FILE" -p "$DOWNLOAD_DIR/$(dirname "$FILE")" --force -q
 
@@ -162,5 +194,27 @@ for FILE in "${FILES[@]}"; do
     fi
 done
 
+for FILE in "${FILES_TEST[@]}"; do
+    COUNT=$((COUNT + 1))
+    echo "[$COUNT/$TOTAL_ALL] Downloading $FILE..."
+
+    #!/bin/bash
+    kaggle datasets download $TEST_DATASET -f "$FILE" -p "$DOWNLOAD_DIR/$(dirname "$FILE")" --force -q
+
+    if [ $? -eq 0 ]; then
+        # Unzip if downloaded as zip
+        BASENAME=$(basename "$FILE")
+        ZIPFILE="$DOWNLOAD_DIR/$(dirname "$FILE")/${BASENAME}.zip"
+        if [ -f "$ZIPFILE" ]; then
+            unzip -o -q "$ZIPFILE" -d "$DOWNLOAD_DIR/$(dirname "$FILE")"
+            rm "$ZIPFILE"
+        fi
+        echo "  ✓ Done"
+    else
+        FAILED=$((FAILED + 1))
+        echo "  ✗ Failed"
+    fi
+done
+
 echo "============================================="
-echo "Complete: $((TOTAL - FAILED))/$TOTAL succeeded, $FAILED failed"
+echo "Complete: $((TOTAL_ALL - FAILED))/$TOTAL_ALL succeeded, $FAILED failed"
