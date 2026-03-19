@@ -51,14 +51,14 @@ def _existing_file_ids(landmarks_dir: str) -> set:
 
 def main():
     p = argparse.ArgumentParser(
-        description="Evaluate a trained ASL model on the supplemental test set"
+        description="Evaluate a trained ASL model on the (rerun) test set"
     )
     p.add_argument("--ckpt", type=str, required=True, help="Path to checkpoint (.pt)")
     p.add_argument(
         "--data_dir",
         type=str,
         default="src/data/asl-fingerspelling",
-        help="Root data directory (must contain supplemental_metadata.csv and supplemental_landmarks/)",
+        help="Root data directory (must contain labels.pq and test_landmarks/)",
     )
     p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--num_workers", type=int, default=0)
@@ -83,22 +83,15 @@ def main():
     ckpt_config = ckpt.get("config", {})
     ckpt_epoch = ckpt.get("epoch", "?")
 
-    if ckpt_config.get("use_supplemental", False):
-        print(
-            "WARNING: this checkpoint was trained with --use_supplemental=True.\n"
-            "  The supplemental set overlaps with training data — test metrics are INVALID.\n"
-            "  Proceeding, but interpret results with caution.\n"
-        )
-
     max_frames = ckpt_config.get("max_frames", 160)
     print(f"Checkpoint: epoch={ckpt_epoch}, max_frames={max_frames}")
 
     # --- Paths ---
-    supp_csv = os.path.join(args.data_dir, "supplemental_metadata.csv")
-    supp_landmarks = os.path.join(args.data_dir, "supplemental_landmarks")
+    label_pq = os.path.join(args.data_dir, "labels.pq")
+    test_landmarks = os.path.join(args.data_dir, "test_landmarks")
     vocab_json = os.path.join(args.data_dir, "character_to_prediction_index.json")
 
-    for path in [supp_csv, supp_landmarks, vocab_json]:
+    for path in [label_pq, test_landmarks, vocab_json]:
         if not os.path.exists(path):
             raise FileNotFoundError(f"Missing required path: {path}")
 
@@ -106,15 +99,15 @@ def main():
     letter_to_int, int_to_letter, blank_id = build_ctc_vocab(vocab_json)
 
     # --- Load & filter supplemental metadata ---
-    df = pd.read_csv(supp_csv)
-    required_cols = {"file_id", "sequence_id", "participant_id", "phrase"}
+    df = pd.read_parquet(label_pq)
+    required_cols = {"file_id", "sequence_id", "phrase"} # "participant_id" not in test set
     missing = required_cols - set(df.columns)
     if missing:
-        raise ValueError(f"supplemental_metadata.csv is missing columns: {missing}")
+        raise ValueError(f"labels.pq is missing columns: {missing}")
 
-    have_ids = _existing_file_ids(supp_landmarks)
+    have_ids = _existing_file_ids(test_landmarks)
     if not have_ids:
-        raise ValueError(f"No parquet files found in {supp_landmarks}")
+        raise ValueError(f"No parquet files found in {test_landmarks}")
     df = df[df["file_id"].isin(have_ids)].copy()
     print(f"Rows after filtering to available parquets ({len(have_ids)} files): {len(df)}")
 
@@ -130,7 +123,7 @@ def main():
     print("Pre-filtering sequences with no right-hand landmarks...")
     valid_mask = []
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Checking landmarks", leave=False):
-        ppath = os.path.join(supp_landmarks, f"{int(row['file_id'])}.parquet")
+        ppath = os.path.join(test_landmarks, f"{int(row['file_id'])}.parquet")
         if not os.path.exists(ppath):
             valid_mask.append(False)
             continue
@@ -145,7 +138,7 @@ def main():
     # --- Dataset & loader (no augmentation) ---
     test_ds = ASLRightHandDataset(
         df,
-        landmarks_dir=supp_landmarks,
+        landmarks_dir=test_landmarks,
         max_frames=max_frames,
         training=False,
     )
